@@ -4,15 +4,23 @@ import psycopg2
 import os
 import logging
 import traceback
+import sys
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configurar logging DETALLADO
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stderr)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
-# Configuración Railway
+# Configuración Railway - VERIFICADA
 DB_CONFIG = {
     'host': 'tramway.proxy.rlwy.net',
     'port': 31631,
@@ -21,268 +29,443 @@ DB_CONFIG = {
     'password': 'KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'
 }
 
+@app.before_first_request
+def initialize():
+    """Inicialización al primer request"""
+    logger.info("🚀 INICIANDO APLICACIÓN FLASK")
+    init_database()
+
 def get_db_connection():
-    """Conecta a PostgreSQL"""
+    """Conecta a PostgreSQL con manejo robusto de errores"""
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        logger.info("✅ Conexión a BD exitosa")
+        logger.info("✅ CONEXIÓN BD EXITOSA")
         return conn
+    except psycopg2.OperationalError as e:
+        logger.error(f"❌ ERROR OPERACIONAL BD: {e}")
+        return None
+    except psycopg2.InterfaceError as e:
+        logger.error(f"❌ ERROR INTERFAZ BD: {e}")
+        return None
     except Exception as e:
-        logger.error(f"❌ Error conectando a PostgreSQL: {e}")
+        logger.error(f"❌ ERROR INESPERADO BD: {e}")
+        logger.error(traceback.format_exc())
         return None
 
 def init_database():
-    """Inicializar tablas si no existen"""
+    """Inicializar tablas con verificación paso a paso"""
+    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BASE DE DATOS")
+    
     try:
         conn = get_db_connection()
         if not conn:
+            logger.error("❌ NO SE PUDO CONECTAR PARA INICIALIZAR BD")
             return False
             
         cur = conn.cursor()
         
-        # Crear tabla usuario si no existe
+        # Verificar si existe la tabla usuario
+        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLAS...")
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS usuario (
-                id SERIAL PRIMARY KEY,
-                nombre VARCHAR(100) UNIQUE NOT NULL,
-                contraseña VARCHAR(100) NOT NULL,
-                fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'usuario'
             );
         """)
+        usuario_existe = cur.fetchone()[0]
         
-        # Crear tabla ongs si no existe
+        if not usuario_existe:
+            logger.info("📦 CREANDO TABLA 'usuario'...")
+            cur.execute("""
+                CREATE TABLE usuario (
+                    id SERIAL PRIMARY KEY,
+                    nombre VARCHAR(100) UNIQUE NOT NULL,
+                    contraseña VARCHAR(100) NOT NULL,
+                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE")
+        else:
+            logger.info("✅ TABLA 'usuario' YA EXISTE")
+        
+        # Verificar tabla ongs
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS ongs (
-                id SERIAL PRIMARY KEY,
-                nombre VARCHAR(200),
-                latitud DECIMAL(10, 8),
-                longitud DECIMAL(11, 8),
-                descripcion TEXT,
-                telefono VARCHAR(20),
-                estado VARCHAR(100),
-                municipio VARCHAR(100),
-                fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'ongs'
             );
         """)
+        ongs_existe = cur.fetchone()[0]
+        
+        if not ongs_existe:
+            logger.info("📦 CREANDO TABLA 'ongs'...")
+            cur.execute("""
+                CREATE TABLE ongs (
+                    id SERIAL PRIMARY KEY,
+                    nombre VARCHAR(200),
+                    latitud DECIMAL(10, 8),
+                    longitud DECIMAL(11, 8),
+                    descripcion TEXT,
+                    telefono VARCHAR(20),
+                    estado VARCHAR(100),
+                    municipio VARCHAR(100),
+                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            logger.info("✅ TABLA 'ongs' CREADA EXITOSAMENTE")
+        else:
+            logger.info("✅ TABLA 'ongs' YA EXISTE")
         
         conn.commit()
         cur.close()
         conn.close()
-        logger.info("✅ Tablas inicializadas/verificadas")
+        
+        logger.info("🎉 INICIALIZACIÓN DE BD COMPLETADA")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Error en init_database: {e}")
+        logger.error(f"💥 ERROR CRÍTICO EN INIT_DATABASE: {e}")
+        logger.error(traceback.format_exc())
         return False
-
-# Inicializar BD al inicio
-init_database()
 
 @app.route("/")
 def home():
+    """Endpoint raíz"""
     return jsonify({
         "status": "active", 
-        "message": "🚀 API Flask - ONGs México",
-        "version": "5.0",
-        "database": "conectada",
-        "endpoints": {
-            "health": "/api/health",
-            "initdb": "/api/initdb", 
-            "register": "/api/auth/register",
-            "login": "/api/auth/login",
-            "ongs": "/api/ongs"
-        }
+        "message": "🚀 API Flask - ONGs México - DEPURADA",
+        "version": "6.0",
+        "database_status": "conectada",
+        "endpoints_available": True
     })
-
-@app.route("/api/initdb", methods=['GET'])
-def init_db():
-    """Forzar inicialización de BD"""
-    success = init_database()
-    if success:
-        return jsonify({"success": True, "message": "✅ BD inicializada"})
-    else:
-        return jsonify({"success": False, "message": "❌ Error inicializando BD"}), 500
 
 @app.route("/api/health", methods=['GET'])
 def health_check():
-    """Health check completo"""
+    """Health check COMPLETO con diagnóstico"""
+    logger.info("❤️ SOLICITUD HEALTH CHECK")
+    
     try:
+        # 1. Verificar conexión básica
         conn = get_db_connection()
         if not conn:
-            return jsonify({"status": "error", "message": "❌ No se pudo conectar a BD"}), 500
-            
+            return jsonify({
+                "status": "unhealthy",
+                "message": "❌ NO SE PUEDE CONECTAR A LA BASE DE DATOS",
+                "database_connection": False,
+                "timestamp": str(__import__('datetime').datetime.now())
+            }), 500
+        
         cur = conn.cursor()
         
-        # Verificar tablas existentes
-        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+        # 2. Verificar tablas
+        cur.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """)
         tablas = [row[0] for row in cur.fetchall()]
+        logger.info(f"📋 TABLAS ENCONTRADAS: {tablas}")
         
-        # Contar usuarios
-        total_usuarios = 0
+        # 3. Contar registros
+        stats = {}
         if 'usuario' in tablas:
             cur.execute("SELECT COUNT(*) FROM usuario")
-            total_usuarios = cur.fetchone()[0]
-        
-        # Contar ONGs
-        total_ongs = 0
+            stats['total_usuarios'] = cur.fetchone()[0]
+        else:
+            stats['total_usuarios'] = "tabla_no_existe"
+            
         if 'ongs' in tablas:
             cur.execute("SELECT COUNT(*) FROM ongs")
-            total_ongs = cur.fetchone()[0]
+            stats['total_ongs'] = cur.fetchone()[0]
+        else:
+            stats['total_ongs'] = "tabla_no_existe"
         
         cur.close()
         conn.close()
         
         return jsonify({
             "status": "healthy",
-            "message": "✅ API y BD funcionando",
+            "message": "✅ SISTEMA OPERATIVO",
+            "database_connection": True,
             "tablas": tablas,
-            "total_usuarios": total_usuarios,
-            "total_ongs": total_ongs,
-            "tabla_usuario_existe": 'usuario' in tablas,
-            "tabla_ongs_existe": 'ongs' in tablas
+            "estadisticas": stats,
+            "timestamp": str(__import__('datetime').datetime.now())
         })
         
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"💥 ERROR EN HEALTH CHECK: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"❌ ERROR: {str(e)}",
+            "timestamp": str(__import__('datetime').datetime.now())
+        }), 500
+
+@app.route("/api/initdb", methods=['GET', 'POST'])
+def init_db():
+    """Forzar inicialización de BD con respuesta detallada"""
+    logger.info("🔄 SOLICITUD DE INICIALIZACIÓN DE BD")
+    
+    success = init_database()
+    
+    if success:
+        return jsonify({
+            "success": True,
+            "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE",
+            "details": "Tablas 'usuario' y 'ongs' verificadas/creadas"
+        })
+    else:
+        return jsonify({
+            "success": False,
+            "message": "❌ ERROR INICIALIZANDO BASE DE DATOS",
+            "details": "Revisar logs para más información"
+        }), 500
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    """Registro de usuario - VERSIÓN ROBUSTA"""
-    logger.info("🎯 INICIANDO PROCESO DE REGISTRO")
+    """Registro de usuario - VERSIÓN ULTRA ROBUSTA"""
+    logger.info("🎯 INICIANDO PROCESO DE REGISTRO DE USUARIO")
     
     try:
-        # 1. Obtener y validar datos
+        # 1. OBTENER Y LOGUEAR DATOS
         data = request.get_json()
-        logger.info(f"📨 Datos recibidos: {data}")
-        
         if not data:
-            return jsonify({'success': False, 'message': 'No se recibieron datos'}), 400
+            logger.error("❌ NO SE RECIBIERON DATOS JSON")
+            return jsonify({
+                'success': False, 
+                'message': 'No se recibieron datos',
+                'error_code': 'NO_DATA'
+            }), 400
         
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
         
-        logger.info(f"👤 Usuario: '{username}', Longitud password: {len(password)}")
+        logger.info(f"📨 DATOS RECIBIDOS - Usuario: '{username}', Password: [{'*' * len(password)}]")
         
-        # Validaciones
+        # 2. VALIDACIONES DETALLADAS
         if not username:
-            return jsonify({'success': False, 'message': 'Usuario requerido'}), 400
+            logger.error("❌ USUARIO VACÍO")
+            return jsonify({
+                'success': False, 
+                'message': 'El usuario no puede estar vacío',
+                'error_code': 'EMPTY_USERNAME'
+            }), 400
+            
         if not password:
-            return jsonify({'success': False, 'message': 'Contraseña requerida'}), 400
-        if len(password) < 4:
-            return jsonify({'success': False, 'message': 'La contraseña debe tener al menos 4 caracteres'}), 400
-        if len(username) < 3:
-            return jsonify({'success': False, 'message': 'El usuario debe tener al menos 3 caracteres'}), 400
+            logger.error("❌ CONTRASEÑA VACÍA")
+            return jsonify({
+                'success': False, 
+                'message': 'La contraseña no puede estar vacía', 
+                'error_code': 'EMPTY_PASSWORD'
+            }), 400
 
-        # 2. Conectar a BD
+        if len(password) < 4:
+            logger.error("❌ CONTRASEÑA DEMASIADO CORTA")
+            return jsonify({
+                'success': False, 
+                'message': 'La contraseña debe tener al menos 4 caracteres',
+                'error_code': 'SHORT_PASSWORD'
+            }), 400
+
+        # 3. CONEXIÓN A BD
+        logger.info("🔌 CONECTANDO A BASE DE DATOS...")
         conn = get_db_connection()
         if not conn:
-            return jsonify({'success': False, 'message': 'Error de conexión a la base de datos'}), 500
+            logger.error("❌ FALLA CRÍTICA DE CONEXIÓN A BD")
+            return jsonify({
+                'success': False, 
+                'message': 'Error de conexión a la base de datos',
+                'error_code': 'DB_CONNECTION_FAILED'
+            }), 500
             
         cur = conn.cursor()
         
-        # 3. Verificar si usuario existe
-        logger.info(f"🔍 Verificando existencia de usuario: {username}")
-        cur.execute("SELECT id FROM usuario WHERE nombre = %s", (username,))
-        existing_user = cur.fetchone()
-        
-        if existing_user:
-            logger.warning(f"❌ Usuario ya existe: {username}")
+        # 4. VERIFICAR SI USUARIO EXISTE
+        logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO: {username}")
+        try:
+            cur.execute("SELECT id FROM usuario WHERE nombre = %s", (username,))
+            existing_user = cur.fetchone()
+            
+            if existing_user:
+                logger.warning(f"❌ USUARIO YA EXISTE: {username}")
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'El usuario ya existe',
+                    'error_code': 'USER_EXISTS'
+                }), 409
+        except Exception as e:
+            logger.error(f"❌ ERROR VERIFICANDO USUARIO: {e}")
             cur.close()
             conn.close()
-            return jsonify({'success': False, 'message': 'El usuario ya existe'}), 409
-        
-        # 4. Insertar nuevo usuario
-        logger.info(f"💾 Insertando nuevo usuario: {username}")
-        cur.execute(
-            "INSERT INTO usuario (nombre, contraseña) VALUES (%s, %s) RETURNING id", 
-            (username, password)
-        )
-        user_id = cur.fetchone()[0]
-        conn.commit()
-        
-        logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}")
-        
-        # 5. Verificar inserción
+            return jsonify({
+                'success': False,
+                'message': 'Error verificando usuario',
+                'error_code': 'CHECK_USER_ERROR'
+            }), 500
+
+        # 5. INSERTAR NUEVO USUARIO
+        logger.info(f"💾 INSERTANDO NUEVO USUARIO: {username}")
+        try:
+            cur.execute(
+                "INSERT INTO usuario (nombre, contraseña) VALUES (%s, %s) RETURNING id", 
+                (username, password)
+            )
+            user_id = cur.fetchone()[0]
+            conn.commit()
+            
+            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, Usuario: {username}")
+            
+        except psycopg2.IntegrityError as e:
+            logger.error(f"❌ ERROR DE INTEGRIDAD AL INSERTAR: {e}")
+            conn.rollback()
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'Error de integridad - posible usuario duplicado',
+                'error_code': 'INTEGRITY_ERROR'
+            }), 409
+        except Exception as e:
+            logger.error(f"❌ ERROR INSERTANDO USUARIO: {e}")
+            conn.rollback()
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': f'Error insertando usuario: {str(e)}',
+                'error_code': 'INSERT_ERROR'
+            }), 500
+
+        # 6. VERIFICAR INSERCIÓN
+        logger.info("🔍 VERIFICANDO INSERCIÓN...")
         cur.execute("SELECT COUNT(*) FROM usuario")
         total_usuarios = cur.fetchone()[0]
-        logger.info(f"📊 Total de usuarios en BD: {total_usuarios}")
         
         cur.close()
         conn.close()
+        
+        logger.info(f"📊 VERIFICACIÓN EXITOSA - Total usuarios en BD: {total_usuarios}")
         
         return jsonify({
             'success': True,
             'message': 'Usuario registrado exitosamente',
             'user_id': user_id,
-            'total_usuarios': total_usuarios
+            'username': username,
+            'total_usuarios': total_usuarios,
+            'timestamp': str(__import__('datetime').datetime.now())
         })
         
-    except psycopg2.IntegrityError:
-        logger.error("❌ Error de integridad - usuario duplicado")
-        return jsonify({'success': False, 'message': 'El usuario ya existe'}), 409
     except Exception as e:
-        logger.error(f"💥 ERROR CRÍTICO EN REGISTRO: {str(e)}")
+        logger.error(f"💥 ERROR CRÍTICO NO MANEJADO EN REGISTRO: {e}")
         logger.error(traceback.format_exc())
         return jsonify({
             'success': False, 
-            'message': f'Error del servidor: {str(e)}'
+            'message': f'Error crítico del servidor: {str(e)}',
+            'error_code': 'UNHANDLED_ERROR',
+            'timestamp': str(__import__('datetime').datetime.now())
         }), 500
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Login de usuario"""
+    """Login de usuario - VERSIÓN DEPURADA"""
+    logger.info("🔐 INICIANDO PROCESO DE LOGIN")
+    
     try:
         data = request.get_json()
         if not data:
-            return jsonify({'success': False, 'message': 'Datos no proporcionados'}), 400
+            return jsonify({
+                'success': False, 
+                'message': 'Datos no proporcionados',
+                'error_code': 'NO_DATA'
+            }), 400
         
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
 
-        logger.info(f"🔐 Intentando login para: {username}")
+        logger.info(f"🔐 INTENTANDO LOGIN - Usuario: '{username}'")
 
         if not username or not password:
-            return jsonify({'success': False, 'message': 'Usuario y contraseña requeridos'}), 400
+            return jsonify({
+                'success': False, 
+                'message': 'Usuario y contraseña requeridos',
+                'error_code': 'MISSING_CREDENTIALS'
+            }), 400
 
         conn = get_db_connection()
         if not conn:
-            return jsonify({'success': False, 'message': 'Error de conexión a BD'}), 500
+            return jsonify({
+                'success': False, 
+                'message': 'Error de conexión a BD',
+                'error_code': 'DB_CONNECTION_FAILED'
+            }), 500
             
         cur = conn.cursor()
-        cur.execute("SELECT id, nombre FROM usuario WHERE nombre = %s AND contraseña = %s", (username, password))
-        user = cur.fetchone()
+        
+        try:
+            cur.execute("SELECT id, nombre FROM usuario WHERE nombre = %s AND contraseña = %s", 
+                       (username, password))
+            user = cur.fetchone()
+        except Exception as e:
+            logger.error(f"❌ ERROR EN CONSULTA LOGIN: {e}")
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'message': 'Error en consulta de login',
+                'error_code': 'QUERY_ERROR'
+            }), 500
+        
         cur.close()
         conn.close()
 
         if user:
-            logger.info(f"✅ Login exitoso para: {username}")
+            logger.info(f"✅ LOGIN EXITOSO - Usuario: {username}, ID: {user[0]}")
             return jsonify({
                 'success': True,
                 'message': 'Login exitoso',
                 'user': {
                     'id': user[0],
                     'nombre': user[1]
-                }
+                },
+                'timestamp': str(__import__('datetime').datetime.now())
             })
         else:
-            logger.warning(f"❌ Credenciales incorrectas para: {username}")
-            return jsonify({'success': False, 'message': 'Credenciales incorrectas'}), 401
+            logger.warning(f"❌ CREDENCIALES INCORRECTAS - Usuario: {username}")
+            return jsonify({
+                'success': False, 
+                'message': 'Credenciales incorrectas',
+                'error_code': 'INVALID_CREDENTIALS'
+            }), 401
 
     except Exception as e:
-        logger.error(f"💥 Error en login: {e}")
-        return jsonify({'success': False, 'message': 'Error del servidor'}), 500
+        logger.error(f"💥 ERROR EN LOGIN: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False, 
+            'message': 'Error del servidor en login',
+            'error_code': 'LOGIN_ERROR',
+            'timestamp': str(__import__('datetime').datetime.now())
+        }), 500
 
 @app.route("/api/ongs", methods=['GET'])
 def get_ongs():
-    """Obtener todas las ONGs"""
+    """Obtener ONGs - VERSIÓN TOLERANTE A FALLOS"""
+    logger.info("🏥 SOLICITANDO LISTA DE ONGs")
+    
     try:
         conn = get_db_connection()
         if not conn:
+            logger.warning("⚠️ BD NO DISPONIBLE, RETORNANDO LISTA VACÍA")
             return jsonify({
                 'success': True, 
                 'ongs': [], 
                 'count': 0, 
-                'message': 'Base de datos no disponible'
+                'message': 'Base de datos no disponible',
+                'timestamp': str(__import__('datetime').datetime.now())
             })
             
         cur = conn.cursor()
@@ -293,6 +476,7 @@ def get_ongs():
         
         for table in table_names:
             try:
+                logger.info(f"🔍 BUSCANDO EN TABLA: {table}")
                 cur.execute(f"""
                     SELECT nombre, latitud, longitud, descripcion, telefono, estado, municipio 
                     FROM {table} 
@@ -301,10 +485,10 @@ def get_ongs():
                 """)
                 ongs_data = cur.fetchall()
                 if ongs_data:
-                    logger.info(f"✅ Tabla encontrada: {table}")
+                    logger.info(f"✅ DATOS OBTENIDOS DE TABLA: {table}")
                     break
             except Exception as e:
-                logger.warning(f"Tabla {table} no encontrada: {e}")
+                logger.warning(f"⚠️ TABLA {table} NO ENCONTRADA: {e}")
                 continue
         
         cur.close()
@@ -323,31 +507,38 @@ def get_ongs():
                 'municipio': ong[6] or 'Sin municipio'
             })
 
-        logger.info(f"📊 Se enviaron {len(ongs_list)} ONGs")
+        logger.info(f"📊 ONGs ENVIADAS: {len(ongs_list)} registros")
         
         return jsonify({
             'success': True, 
             'ongs': ongs_list, 
             'count': len(ongs_list),
-            'message': f'Se encontraron {len(ongs_list)} ONGs'
+            'message': f'Se encontraron {len(ongs_list)} ONGs',
+            'timestamp': str(__import__('datetime').datetime.now())
         })
 
     except Exception as e:
-        logger.error(f"💥 Error obteniendo ONGs: {e}")
+        logger.error(f"💥 ERROR OBTENIENDO ONGs: {e}")
         return jsonify({
             'success': True, 
             'ongs': [], 
             'count': 0, 
-            'message': 'Error cargando ONGs'
+            'message': 'Error cargando ONGs',
+            'timestamp': str(__import__('datetime').datetime.now())
         })
 
 @app.route("/api/debug/db", methods=['GET'])
 def debug_db():
-    """Diagnóstico de la base de datos"""
+    """Diagnóstico completo de la base de datos"""
+    logger.info("🐛 SOLICITUD DE DIAGNÓSTICO DE BD")
+    
     try:
         conn = get_db_connection()
         if not conn:
-            return jsonify({"error": "No se pudo conectar a BD"}), 500
+            return jsonify({
+                "error": "No se pudo conectar a BD",
+                "connection_status": "FAILED"
+            }), 500
             
         cur = conn.cursor()
         
@@ -366,19 +557,41 @@ def debug_db():
             try:
                 cur.execute(f"SELECT COUNT(*) FROM {tabla}")
                 counts[tabla] = cur.fetchone()[0]
-            except:
-                counts[tabla] = "error"
+            except Exception as e:
+                counts[tabla] = f"error: {str(e)}"
+        
+        # Verificar estructura de tabla usuario
+        usuario_structure = {}
+        if 'usuario' in tablas:
+            try:
+                cur.execute("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'usuario'
+                """)
+                usuario_structure = [dict(zip(['column', 'type', 'nullable'], row)) for row in cur.fetchall()]
+            except Exception as e:
+                usuario_structure = f"error: {str(e)}"
         
         cur.close()
         conn.close()
         
         return jsonify({
             "status": "success",
+            "connection_status": "SUCCESS",
             "tablas": tablas,
             "conteos": counts,
-            "total_tablas": len(tablas)
+            "estructura_usuario": usuario_structure,
+            "total_tablas": len(tablas),
+            "timestamp": str(__import__('datetime').datetime.now())
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"💥 ERROR EN DIAGNÓSTICO: {e}")
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": str(__import__('datetime').datetime.now())
+        }), 500
 
-# NO incluyas app.run() - Railway usa Gunicorn
+# NO INCLUIR app.run() - RAILWAY USA GUNICORN
+logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE")
