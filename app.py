@@ -1,10 +1,11 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 import psycopg2
 import os
 import logging
 import traceback
 import sys
+from datetime import datetime
 
 # Configurar logging DETALLADO
 logging.basicConfig(
@@ -28,12 +29,6 @@ DB_CONFIG = {
     'user': 'postgres',
     'password': 'KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'
 }
-
-@app.before_first_request
-def initialize():
-    """Inicialización al primer request"""
-    logger.info("🚀 INICIANDO APLICACIÓN FLASK")
-    init_database()
 
 def get_db_connection():
     """Conecta a PostgreSQL con manejo robusto de errores"""
@@ -130,15 +125,25 @@ def init_database():
         logger.error(traceback.format_exc())
         return False
 
+# INICIALIZACIÓN AL PRIMER REQUEST - VERSIÓN COMPATIBLE CON FLASK 2.3+
+@app.before_request
+def initialize_on_first_request():
+    """Inicialización que se ejecuta una vez en el primer request"""
+    if not hasattr(g, 'db_initialized'):
+        logger.info("🚀 INICIANDO APLICACIÓN FLASK - PRIMER REQUEST")
+        init_database()
+        g.db_initialized = True
+
 @app.route("/")
 def home():
     """Endpoint raíz"""
     return jsonify({
         "status": "active", 
-        "message": "🚀 API Flask - ONGs México - DEPURADA",
-        "version": "6.0",
+        "message": "🚀 API Flask - ONGs México - CORREGIDA",
+        "version": "7.0",
         "database_status": "conectada",
-        "endpoints_available": True
+        "endpoints_available": True,
+        "timestamp": str(datetime.now())
     })
 
 @app.route("/api/health", methods=['GET'])
@@ -154,7 +159,7 @@ def health_check():
                 "status": "unhealthy",
                 "message": "❌ NO SE PUEDE CONECTAR A LA BASE DE DATOS",
                 "database_connection": False,
-                "timestamp": str(__import__('datetime').datetime.now())
+                "timestamp": str(datetime.now())
             }), 500
         
         cur = conn.cursor()
@@ -192,7 +197,7 @@ def health_check():
             "database_connection": True,
             "tablas": tablas,
             "estadisticas": stats,
-            "timestamp": str(__import__('datetime').datetime.now())
+            "timestamp": str(datetime.now())
         })
         
     except Exception as e:
@@ -200,7 +205,7 @@ def health_check():
         return jsonify({
             "status": "error",
             "message": f"❌ ERROR: {str(e)}",
-            "timestamp": str(__import__('datetime').datetime.now())
+            "timestamp": str(datetime.now())
         }), 500
 
 @app.route("/api/initdb", methods=['GET', 'POST'])
@@ -214,13 +219,15 @@ def init_db():
         return jsonify({
             "success": True,
             "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE",
-            "details": "Tablas 'usuario' y 'ongs' verificadas/creadas"
+            "details": "Tablas 'usuario' y 'ongs' verificadas/creadas",
+            "timestamp": str(datetime.now())
         })
     else:
         return jsonify({
             "success": False,
             "message": "❌ ERROR INICIALIZANDO BASE DE DATOS",
-            "details": "Revisar logs para más información"
+            "details": "Revisar logs para más información",
+            "timestamp": str(datetime.now())
         }), 500
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -236,7 +243,8 @@ def register():
             return jsonify({
                 'success': False, 
                 'message': 'No se recibieron datos',
-                'error_code': 'NO_DATA'
+                'error_code': 'NO_DATA',
+                'timestamp': str(datetime.now())
             }), 400
         
         username = data.get('username', '').strip()
@@ -250,7 +258,8 @@ def register():
             return jsonify({
                 'success': False, 
                 'message': 'El usuario no puede estar vacío',
-                'error_code': 'EMPTY_USERNAME'
+                'error_code': 'EMPTY_USERNAME',
+                'timestamp': str(datetime.now())
             }), 400
             
         if not password:
@@ -258,7 +267,8 @@ def register():
             return jsonify({
                 'success': False, 
                 'message': 'La contraseña no puede estar vacía', 
-                'error_code': 'EMPTY_PASSWORD'
+                'error_code': 'EMPTY_PASSWORD',
+                'timestamp': str(datetime.now())
             }), 400
 
         if len(password) < 4:
@@ -266,7 +276,8 @@ def register():
             return jsonify({
                 'success': False, 
                 'message': 'La contraseña debe tener al menos 4 caracteres',
-                'error_code': 'SHORT_PASSWORD'
+                'error_code': 'SHORT_PASSWORD',
+                'timestamp': str(datetime.now())
             }), 400
 
         # 3. CONEXIÓN A BD
@@ -277,7 +288,8 @@ def register():
             return jsonify({
                 'success': False, 
                 'message': 'Error de conexión a la base de datos',
-                'error_code': 'DB_CONNECTION_FAILED'
+                'error_code': 'DB_CONNECTION_FAILED',
+                'timestamp': str(datetime.now())
             }), 500
             
         cur = conn.cursor()
@@ -295,7 +307,8 @@ def register():
                 return jsonify({
                     'success': False,
                     'message': 'El usuario ya existe',
-                    'error_code': 'USER_EXISTS'
+                    'error_code': 'USER_EXISTS',
+                    'timestamp': str(datetime.now())
                 }), 409
         except Exception as e:
             logger.error(f"❌ ERROR VERIFICANDO USUARIO: {e}")
@@ -304,7 +317,8 @@ def register():
             return jsonify({
                 'success': False,
                 'message': 'Error verificando usuario',
-                'error_code': 'CHECK_USER_ERROR'
+                'error_code': 'CHECK_USER_ERROR',
+                'timestamp': str(datetime.now())
             }), 500
 
         # 5. INSERTAR NUEVO USUARIO
@@ -327,7 +341,8 @@ def register():
             return jsonify({
                 'success': False,
                 'message': 'Error de integridad - posible usuario duplicado',
-                'error_code': 'INTEGRITY_ERROR'
+                'error_code': 'INTEGRITY_ERROR',
+                'timestamp': str(datetime.now())
             }), 409
         except Exception as e:
             logger.error(f"❌ ERROR INSERTANDO USUARIO: {e}")
@@ -337,7 +352,8 @@ def register():
             return jsonify({
                 'success': False,
                 'message': f'Error insertando usuario: {str(e)}',
-                'error_code': 'INSERT_ERROR'
+                'error_code': 'INSERT_ERROR',
+                'timestamp': str(datetime.now())
             }), 500
 
         # 6. VERIFICAR INSERCIÓN
@@ -356,7 +372,7 @@ def register():
             'user_id': user_id,
             'username': username,
             'total_usuarios': total_usuarios,
-            'timestamp': str(__import__('datetime').datetime.now())
+            'timestamp': str(datetime.now())
         })
         
     except Exception as e:
@@ -366,7 +382,7 @@ def register():
             'success': False, 
             'message': f'Error crítico del servidor: {str(e)}',
             'error_code': 'UNHANDLED_ERROR',
-            'timestamp': str(__import__('datetime').datetime.now())
+            'timestamp': str(datetime.now())
         }), 500
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -380,7 +396,8 @@ def login():
             return jsonify({
                 'success': False, 
                 'message': 'Datos no proporcionados',
-                'error_code': 'NO_DATA'
+                'error_code': 'NO_DATA',
+                'timestamp': str(datetime.now())
             }), 400
         
         username = data.get('username', '').strip()
@@ -392,7 +409,8 @@ def login():
             return jsonify({
                 'success': False, 
                 'message': 'Usuario y contraseña requeridos',
-                'error_code': 'MISSING_CREDENTIALS'
+                'error_code': 'MISSING_CREDENTIALS',
+                'timestamp': str(datetime.now())
             }), 400
 
         conn = get_db_connection()
@@ -400,7 +418,8 @@ def login():
             return jsonify({
                 'success': False, 
                 'message': 'Error de conexión a BD',
-                'error_code': 'DB_CONNECTION_FAILED'
+                'error_code': 'DB_CONNECTION_FAILED',
+                'timestamp': str(datetime.now())
             }), 500
             
         cur = conn.cursor()
@@ -416,7 +435,8 @@ def login():
             return jsonify({
                 'success': False, 
                 'message': 'Error en consulta de login',
-                'error_code': 'QUERY_ERROR'
+                'error_code': 'QUERY_ERROR',
+                'timestamp': str(datetime.now())
             }), 500
         
         cur.close()
@@ -431,14 +451,15 @@ def login():
                     'id': user[0],
                     'nombre': user[1]
                 },
-                'timestamp': str(__import__('datetime').datetime.now())
+                'timestamp': str(datetime.now())
             })
         else:
             logger.warning(f"❌ CREDENCIALES INCORRECTAS - Usuario: {username}")
             return jsonify({
                 'success': False, 
                 'message': 'Credenciales incorrectas',
-                'error_code': 'INVALID_CREDENTIALS'
+                'error_code': 'INVALID_CREDENTIALS',
+                'timestamp': str(datetime.now())
             }), 401
 
     except Exception as e:
@@ -448,7 +469,7 @@ def login():
             'success': False, 
             'message': 'Error del servidor en login',
             'error_code': 'LOGIN_ERROR',
-            'timestamp': str(__import__('datetime').datetime.now())
+            'timestamp': str(datetime.now())
         }), 500
 
 @app.route("/api/ongs", methods=['GET'])
@@ -465,7 +486,7 @@ def get_ongs():
                 'ongs': [], 
                 'count': 0, 
                 'message': 'Base de datos no disponible',
-                'timestamp': str(__import__('datetime').datetime.now())
+                'timestamp': str(datetime.now())
             })
             
         cur = conn.cursor()
@@ -514,7 +535,7 @@ def get_ongs():
             'ongs': ongs_list, 
             'count': len(ongs_list),
             'message': f'Se encontraron {len(ongs_list)} ONGs',
-            'timestamp': str(__import__('datetime').datetime.now())
+            'timestamp': str(datetime.now())
         })
 
     except Exception as e:
@@ -524,7 +545,7 @@ def get_ongs():
             'ongs': [], 
             'count': 0, 
             'message': 'Error cargando ONGs',
-            'timestamp': str(__import__('datetime').datetime.now())
+            'timestamp': str(datetime.now())
         })
 
 @app.route("/api/debug/db", methods=['GET'])
@@ -537,7 +558,8 @@ def debug_db():
         if not conn:
             return jsonify({
                 "error": "No se pudo conectar a BD",
-                "connection_status": "FAILED"
+                "connection_status": "FAILED",
+                "timestamp": str(datetime.now())
             }), 500
             
         cur = conn.cursor()
@@ -583,14 +605,14 @@ def debug_db():
             "conteos": counts,
             "estructura_usuario": usuario_structure,
             "total_tablas": len(tablas),
-            "timestamp": str(__import__('datetime').datetime.now())
+            "timestamp": str(datetime.now())
         })
     except Exception as e:
         logger.error(f"💥 ERROR EN DIAGNÓSTICO: {e}")
         return jsonify({
             "error": str(e),
             "traceback": traceback.format_exc(),
-            "timestamp": str(__import__('datetime').datetime.now())
+            "timestamp": str(datetime.now())
         }), 500
 
 # NO INCLUIR app.run() - RAILWAY USA GUNICORN
