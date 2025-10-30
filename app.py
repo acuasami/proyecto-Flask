@@ -139,8 +139,8 @@ def home():
     """Endpoint raíz"""
     return jsonify({
         "status": "active", 
-        "message": "🚀 API Flask - ONGs México - CORREGIDA",
-        "version": "7.0",
+        "message": "🚀 API Flask - ONGs México - REGISTRO CORREGIDO",
+        "version": "8.0",
         "database_status": "conectada",
         "endpoints_available": True,
         "timestamp": str(datetime.now())
@@ -232,17 +232,28 @@ def init_db():
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    """Registro de usuario - VERSIÓN ULTRA ROBUSTA"""
-    logger.info("🎯 INICIANDO PROCESO DE REGISTRO DE USUARIO")
+    """REGISTRO DE USUARIO - VERSIÓN COMPLETAMENTE CORREGIDA"""
+    logger.info("🎯 INICIANDO PROCESO DE REGISTRO - VERSIÓN CORREGIDA")
     
     try:
-        # 1. OBTENER Y LOGUEAR DATOS
+        # 1. OBTENER Y VALIDAR DATOS DE ENTRADA
+        if not request.is_json:
+            logger.error("❌ CONTENT-TYPE NO ES APPLICATION/JSON")
+            return jsonify({
+                'success': False, 
+                'message': 'Content-Type debe ser application/json',
+                'error_code': 'INVALID_CONTENT_TYPE',
+                'timestamp': str(datetime.now())
+            }), 400
+        
         data = request.get_json()
+        logger.info(f"📨 DATOS RECIBIDOS: {data}")
+        
         if not data:
             logger.error("❌ NO SE RECIBIERON DATOS JSON")
             return jsonify({
                 'success': False, 
-                'message': 'No se recibieron datos',
+                'message': 'No se recibieron datos JSON',
                 'error_code': 'NO_DATA',
                 'timestamp': str(datetime.now())
             }), 400
@@ -250,9 +261,9 @@ def register():
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
         
-        logger.info(f"📨 DATOS RECIBIDOS - Usuario: '{username}', Password: [{'*' * len(password)}]")
+        logger.info(f"🔑 USUARIO: '{username}', LONGITUD PASSWORD: {len(password)}")
         
-        # 2. VALIDACIONES DETALLADAS
+        # 2. VALIDACIONES DE DATOS
         if not username:
             logger.error("❌ USUARIO VACÍO")
             return jsonify({
@@ -266,7 +277,7 @@ def register():
             logger.error("❌ CONTRASEÑA VACÍA")
             return jsonify({
                 'success': False, 
-                'message': 'La contraseña no puede estar vacía', 
+                'message': 'La contraseña no puede estar vacía',
                 'error_code': 'EMPTY_PASSWORD',
                 'timestamp': str(datetime.now())
             }), 400
@@ -280,7 +291,7 @@ def register():
                 'timestamp': str(datetime.now())
             }), 400
 
-        # 3. CONEXIÓN A BD
+        # 3. CONEXIÓN A BASE DE DATOS
         logger.info("🔌 CONECTANDO A BASE DE DATOS...")
         conn = get_db_connection()
         if not conn:
@@ -294,7 +305,37 @@ def register():
             
         cur = conn.cursor()
         
-        # 4. VERIFICAR SI USUARIO EXISTE
+        # 4. VERIFICAR Y CREAR TABLA SI NO EXISTE
+        try:
+            logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'usuario'...")
+            cur.execute("SELECT 1 FROM usuario LIMIT 1")
+            logger.info("✅ TABLA 'usuario' EXISTE")
+        except Exception as e:
+            logger.warning(f"⚠️ TABLA 'usuario' NO EXISTE, CREÁNDOLA... Error: {e}")
+            try:
+                cur.execute("""
+                    CREATE TABLE usuario (
+                        id SERIAL PRIMARY KEY,
+                        nombre VARCHAR(100) UNIQUE NOT NULL,
+                        contraseña VARCHAR(100) NOT NULL,
+                        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE")
+            except Exception as create_error:
+                logger.error(f"❌ ERROR CREANDO TABLA: {create_error}")
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Error creando tabla de usuarios',
+                    'error_code': 'TABLE_CREATION_ERROR',
+                    'details': str(create_error),
+                    'timestamp': str(datetime.now())
+                }), 500
+
+        # 5. VERIFICAR SI USUARIO EXISTE
         logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO: {username}")
         try:
             cur.execute("SELECT id FROM usuario WHERE nombre = %s", (username,))
@@ -310,6 +351,9 @@ def register():
                     'error_code': 'USER_EXISTS',
                     'timestamp': str(datetime.now())
                 }), 409
+                
+            logger.info(f"✅ USUARIO DISPONIBLE: {username}")
+            
         except Exception as e:
             logger.error(f"❌ ERROR VERIFICANDO USUARIO: {e}")
             cur.close()
@@ -318,10 +362,11 @@ def register():
                 'success': False,
                 'message': 'Error verificando usuario',
                 'error_code': 'CHECK_USER_ERROR',
+                'details': str(e),
                 'timestamp': str(datetime.now())
             }), 500
 
-        # 5. INSERTAR NUEVO USUARIO
+        # 6. INSERTAR NUEVO USUARIO
         logger.info(f"💾 INSERTANDO NUEVO USUARIO: {username}")
         try:
             cur.execute(
@@ -331,19 +376,8 @@ def register():
             user_id = cur.fetchone()[0]
             conn.commit()
             
-            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, Usuario: {username}")
+            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, USUARIO: {username}")
             
-        except psycopg2.IntegrityError as e:
-            logger.error(f"❌ ERROR DE INTEGRIDAD AL INSERTAR: {e}")
-            conn.rollback()
-            cur.close()
-            conn.close()
-            return jsonify({
-                'success': False,
-                'message': 'Error de integridad - posible usuario duplicado',
-                'error_code': 'INTEGRITY_ERROR',
-                'timestamp': str(datetime.now())
-            }), 409
         except Exception as e:
             logger.error(f"❌ ERROR INSERTANDO USUARIO: {e}")
             conn.rollback()
@@ -356,15 +390,21 @@ def register():
                 'timestamp': str(datetime.now())
             }), 500
 
-        # 6. VERIFICAR INSERCIÓN
+        # 7. VERIFICAR INSERCIÓN Y OBTENER ESTADÍSTICAS
         logger.info("🔍 VERIFICANDO INSERCIÓN...")
-        cur.execute("SELECT COUNT(*) FROM usuario")
-        total_usuarios = cur.fetchone()[0]
+        try:
+            cur.execute("SELECT COUNT(*) FROM usuario")
+            total_usuarios = cur.fetchone()[0]
+            logger.info(f"📊 TOTAL USUARIOS EN BD: {total_usuarios}")
+        except Exception as e:
+            logger.warning(f"⚠️ ERROR CONTANDO USUARIOS: {e}")
+            total_usuarios = 1  # Valor por defecto
         
         cur.close()
         conn.close()
         
-        logger.info(f"📊 VERIFICACIÓN EXITOSA - Total usuarios en BD: {total_usuarios}")
+        # 8. RESPUESTA DE ÉXITO
+        logger.info(f"🎉 REGISTRO COMPLETADO EXITOSAMENTE PARA: {username}")
         
         return jsonify({
             'success': True,
