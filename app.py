@@ -48,8 +48,8 @@ def get_db_connection():
         return None
 
 def init_database():
-    """Inicializar tablas con verificación paso a paso"""
-    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BASE DE DATOS")
+    """Inicializar tablas con verificación paso a paso SEGÚN ESQUEMA PDF"""
+    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BASE DE DATOS SEGÚN ESQUEMA PDF")
     
     try:
         conn = get_db_connection()
@@ -59,8 +59,8 @@ def init_database():
             
         cur = conn.cursor()
         
-        # Verificar si existe la tabla usuario
-        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLAS...")
+        # 1. TABLA USUARIO - SEGÚN ESQUEMA PDF
+        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'usuario'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -71,30 +71,71 @@ def init_database():
         usuario_existe = cur.fetchone()[0]
         
         if not usuario_existe:
-            logger.info("📦 CREANDO TABLA 'usuario'...")
+            logger.info("📦 CREANDO TABLA 'usuario' SEGÚN ESQUEMA PDF...")
             cur.execute("""
                 CREATE TABLE usuario (
                     id_usuario SERIAL PRIMARY KEY,
-                    nombre_usuario VARCHAR(100) UNIQUE NOT NULL,
-                    email VARCHAR(100) UNIQUE NOT NULL,
-                    contraseña VARCHAR(100) NOT NULL,
+                    correo VARCHAR(255) UNIQUE NOT NULL,
+                    nombre_Usuario VARCHAR(100) UNIQUE NOT NULL,
+                    contraseña VARCHAR(255) NOT NULL,
                     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE")
+            logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE SEGÚN ESQUEMA PDF")
         else:
             logger.info("✅ TABLA 'usuario' YA EXISTE")
-            # Verificar la estructura de la tabla
+            # Verificar estructura actual
             cur.execute("""
-                SELECT column_name, data_type 
+                SELECT column_name, data_type, is_nullable 
                 FROM information_schema.columns 
                 WHERE table_name = 'usuario' 
                 ORDER BY ordinal_position;
             """)
             columnas = cur.fetchall()
-            logger.info(f"📊 COLUMNAS DE USUARIO: {columnas}")
+            logger.info(f"📊 ESTRUCTURA ACTUAL DE 'usuario': {columnas}")
         
-        # Verificar tabla ongs
+        # 2. TABLA MUNICIPIO - SEGÚN ESQUEMA PDF
+        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'municipio'...")
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'municipio'
+            );
+        """)
+        municipio_existe = cur.fetchone()[0]
+        
+        if not municipio_existe:
+            logger.info("📦 CREANDO TABLA 'municipio' SEGÚN ESQUEMA PDF...")
+            cur.execute("""
+                CREATE TABLE municipio (
+                    id_municipio SERIAL PRIMARY KEY,
+                    nom_municipio VARCHAR(100) NOT NULL,
+                    nom_estado VARCHAR(100) NOT NULL
+                );
+            """)
+            logger.info("✅ TABLA 'municipio' CREADA EXITOSAMENTE")
+            
+            # Insertar algunos municipios de ejemplo
+            municipios_ejemplo = [
+                ('Ciudad de México', 'CDMX'),
+                ('Guadalajara', 'Jalisco'),
+                ('Monterrey', 'Nuevo León'),
+                ('Puebla', 'Puebla'),
+                ('Cancún', 'Quintana Roo')
+            ]
+            
+            for municipio, estado in municipios_ejemplo:
+                cur.execute(
+                    "INSERT INTO municipio (nom_municipio, nom_estado) VALUES (%s, %s)",
+                    (municipio, estado)
+                )
+            logger.info("✅ MUNICIPIOS DE EJEMPLO INSERTADOS")
+        else:
+            logger.info("✅ TABLA 'municipio' YA EXISTE")
+        
+        # 3. TABLA ONGs - SEGÚN ESQUEMA PDF
+        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'ongs'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -105,42 +146,43 @@ def init_database():
         ongs_existe = cur.fetchone()[0]
         
         if not ongs_existe:
-            logger.info("📦 CREANDO TABLA 'ongs'...")
+            logger.info("📦 CREANDO TABLA 'ongs' SEGÚN ESQUEMA PDF...")
             cur.execute("""
                 CREATE TABLE ongs (
                     id_ong SERIAL PRIMARY KEY,
-                    nom_ong VARCHAR(200),
+                    id_municipio INT,
+                    nom_ong VARCHAR(200) NOT NULL,
+                    tipo VARCHAR(100),
                     latitud DECIMAL(10, 8),
                     longitud DECIMAL(11, 8),
-                    tipo TEXT,
                     telefono VARCHAR(20),
                     estado VARCHAR(100),
                     municipio VARCHAR(100),
-                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
                 );
             """)
-            logger.info("✅ TABLA 'ongs' CREADA EXITOSAMENTE")
+            logger.info("✅ TABLA 'ongs' CREADA EXITOSAMENTE SEGÚN ESQUEMA PDF")
             
-            # Insertar datos de ejemplo
-            logger.info("📝 INSERTANDO DATOS DE EJEMPLO EN ONGs...")
+            # Insertar ONGs de ejemplo
             ongs_ejemplo = [
-                ("Fundación Infantil Mexicana", 19.4326, -99.1332, "Ayuda a niños", "55-1234-5678", "CDMX", "Ciudad de México"),
-                ("Ecología y Desarrollo", 20.6668, -103.3918, "Protección ambiental", "33-9876-5432", "Jalisco", "Guadalajara"),
-                ("Cruz Roja Mexicana", 19.4326, -99.1332, "Ayuda humanitaria", "55-1111-2222", "CDMX", "Ciudad de México")
+                (1, 'Fundación Infantil Mexicana', 'Ayuda a niños', 19.4326, -99.1332, '55-1234-5678', 'CDMX', 'Ciudad de México'),
+                (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918, '33-9876-5432', 'Jalisco', 'Guadalajara'),
+                (3, 'Cruz Roja Mexicana', 'Ayuda humanitaria', 25.6866, -100.3161, '81-1111-2222', 'Nuevo León', 'Monterrey')
             ]
             
-            for ong in ongs_ejemplo:
+            for id_municipio, nombre, tipo, lat, lng, tel, estado, municipio in ongs_ejemplo:
                 cur.execute("""
-                    INSERT INTO ongs (nom_ong, latitud, longitud, tipo, telefono, estado, municipio) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, ong)
+                    INSERT INTO ongs (id_municipio, nom_ong, tipo, latitud, longitud, telefono, estado, municipio) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (id_municipio, nombre, tipo, lat, lng, tel, estado, municipio))
             
-            conn.commit()
-            logger.info("✅ DATOS DE EJEMPLO INSERTADOS")
+            logger.info("✅ ONGs DE EJEMPLO INSERTADAS")
         else:
             logger.info("✅ TABLA 'ongs' YA EXISTE")
 
-        # Verificar tabla ubicacion_usuario
+        # 4. TABLA UBICACION_USUARIO - SEGÚN ESQUEMA PDF
+        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'ubicacion_usuario'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -151,17 +193,18 @@ def init_database():
         ubicacion_existe = cur.fetchone()[0]
         
         if not ubicacion_existe:
-            logger.info("📦 CREANDO TABLA 'ubicacion_usuario'...")
+            logger.info("📦 CREANDO TABLA 'ubicacion_usuario' SEGÚN ESQUEMA PDF...")
             cur.execute("""
                 CREATE TABLE ubicacion_usuario (
                     id_ubi_us SERIAL PRIMARY KEY,
                     id_usuario INT NOT NULL,
                     latitud DECIMAL(10, 8) NOT NULL,
                     longitud DECIMAL(11, 8) NOT NULL,
-                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario)
                 );
             """)
-            logger.info("✅ TABLA 'ubicacion_usuario' CREADA EXITOSAMENTE")
+            logger.info("✅ TABLA 'ubicacion_usuario' CREADA EXITOSAMENTE SEGÚN ESQUEMA PDF")
         else:
             logger.info("✅ TABLA 'ubicacion_usuario' YA EXISTE")
         
@@ -169,7 +212,7 @@ def init_database():
         cur.close()
         conn.close()
         
-        logger.info("🎉 INICIALIZACIÓN DE BD COMPLETADA")
+        logger.info("🎉 INICIALIZACIÓN DE BD COMPLETADA SEGÚN ESQUEMA PDF")
         return True
         
     except Exception as e:
@@ -191,8 +234,8 @@ def home():
     """Endpoint raíz"""
     return jsonify({
         "status": "active", 
-        "message": "🚀 API Flask - ONGs México - REGISTRO CORREGIDO",
-        "version": "11.0",
+        "message": "🚀 API Flask - ONGs México - ESQUEMA PDF IMPLEMENTADO",
+        "version": "13.0",
         "database_status": "conectada",
         "endpoints_available": True,
         "timestamp": str(datetime.now())
@@ -230,15 +273,6 @@ def health_check():
         if 'usuario' in tablas:
             cur.execute("SELECT COUNT(*) FROM usuario")
             stats['total_usuarios'] = cur.fetchone()[0]
-            
-            # Verificar estructura de usuario
-            cur.execute("""
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = 'usuario'
-            """)
-            columnas_usuario = cur.fetchall()
-            stats['columnas_usuario'] = str(columnas_usuario)
         else:
             stats['total_usuarios'] = "tabla_no_existe"
             
@@ -253,13 +287,19 @@ def health_check():
             stats['total_ubicaciones'] = cur.fetchone()[0]
         else:
             stats['total_ubicaciones'] = "tabla_no_existe"
+            
+        if 'municipio' in tablas:
+            cur.execute("SELECT COUNT(*) FROM municipio")
+            stats['total_municipios'] = cur.fetchone()[0]
+        else:
+            stats['total_municipios'] = "tabla_no_existe"
         
         cur.close()
         conn.close()
         
         return jsonify({
             "status": "healthy",
-            "message": "✅ SISTEMA OPERATIVO",
+            "message": "✅ SISTEMA OPERATIVO - ESQUEMA PDF",
             "database_connection": True,
             "tablas": tablas,
             "estadisticas": stats,
@@ -284,8 +324,8 @@ def init_db():
     if success:
         return jsonify({
             "success": True,
-            "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE",
-            "details": "Tablas 'usuario', 'ongs' y 'ubicacion_usuario' verificadas/creadas",
+            "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE SEGÚN ESQUEMA PDF",
+            "details": "Tablas 'usuario', 'municipio', 'ongs' y 'ubicacion_usuario' verificadas/creadas",
             "timestamp": str(datetime.now())
         })
     else:
@@ -298,8 +338,8 @@ def init_db():
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    """REGISTRO DE USUARIO - VERSIÓN COMPLETAMENTE CORREGIDA"""
-    logger.info("🎯 INICIANDO PROCESO DE REGISTRO - VERSIÓN CORREGIDA")
+    """REGISTRO DE USUARIO - CORREGIDO SEGÚN ESQUEMA PDF"""
+    logger.info("🎯 INICIANDO PROCESO DE REGISTRO - ESQUEMA PDF")
     
     try:
         # 1. OBTENER Y VALIDAR DATOS DE ENTRADA
@@ -324,27 +364,28 @@ def register():
                 'timestamp': str(datetime.now())
             }), 400
         
+        # SEGÚN ESQUEMA PDF: nombre_Usuario, correo, contraseña
         username = data.get('username', '').strip()
         email = data.get('email', '').strip()
         password = data.get('password', '').strip()
         
-        logger.info(f"🔑 USUARIO: '{username}', EMAIL: '{email}', LONGITUD PASSWORD: {len(password)}")
+        logger.info(f"🔑 USUARIO: '{username}', CORREO: '{email}', LONGITUD CONTRASEÑA: {len(password)}")
         
         # 2. VALIDACIONES DE DATOS
         if not username:
-            logger.error("❌ USUARIO VACÍO")
+            logger.error("❌ NOMBRE_USUARIO VACÍO")
             return jsonify({
                 'success': False, 
-                'message': 'El usuario no puede estar vacío',
+                'message': 'El nombre de usuario no puede estar vacío',
                 'error_code': 'EMPTY_USERNAME',
                 'timestamp': str(datetime.now())
             }), 400
 
         if not email:
-            logger.error("❌ EMAIL VACÍO")
+            logger.error("❌ CORREO VACÍO")
             return jsonify({
                 'success': False, 
-                'message': 'El email no puede estar vacío',
+                'message': 'El correo no puede estar vacío',
                 'error_code': 'EMPTY_EMAIL',
                 'timestamp': str(datetime.now())
             }), 400
@@ -381,90 +422,25 @@ def register():
             
         cur = conn.cursor()
         
-        # 4. VERIFICAR Y CREAR TABLA SI NO EXISTE
-        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'usuario'...")
+        # 4. VERIFICAR SI USUARIO O CORREO EXISTEN - SEGÚN ESQUEMA PDF
+        logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO: {username} Y CORREO: {email}")
         try:
-            # Verificar estructura de la tabla
-            cur.execute("""
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = 'usuario'
-                ORDER BY ordinal_position;
-            """)
-            columnas = cur.fetchall()
-            logger.info(f"📊 ESTRUCTURA DE TABLA USUARIO: {columnas}")
-            
-            # Intentar una consulta simple para verificar si la tabla funciona
-            cur.execute("SELECT 1 FROM usuario LIMIT 1")
-            logger.info("✅ TABLA 'usuario' EXISTE Y ES ACCESIBLE")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ TABLA 'usuario' NO EXISTE O NO ES ACCESIBLE: {e}")
-            logger.info("📦 INTENTANDO CREAR TABLA 'usuario'...")
-            try:
-                # Crear tabla con la estructura correcta según el diagrama
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS usuario (
-                        id_usuario SERIAL PRIMARY KEY,
-                        nombre_usuario VARCHAR(100) UNIQUE NOT NULL,
-                        email VARCHAR(100) UNIQUE NOT NULL,
-                        contraseña VARCHAR(100) NOT NULL,
-                        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                conn.commit()
-                logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE")
-                
-            except Exception as create_error:
-                logger.error(f"❌ ERROR CRÍTICO CREANDO TABLA: {create_error}")
-                cur.close()
-                conn.close()
-                return jsonify({
-                    'success': False,
-                    'message': 'Error crítico creando tabla de usuarios',
-                    'error_code': 'TABLE_CREATION_ERROR',
-                    'details': str(create_error),
-                    'timestamp': str(datetime.now())
-                }), 500
-
-        # 5. VERIFICAR SI USUARIO O EMAIL EXISTEN - CONSULTA CORREGIDA
-        logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO: {username} Y EMAIL: {email}")
-        try:
-            # Consulta adaptativa - probar diferentes nombres de columnas
-            consultas = [
-                "SELECT id_usuario FROM usuario WHERE nombre_usuario = %s OR email = %s",
-                "SELECT id FROM usuario WHERE nombre_usuario = %s OR email = %s", 
-                "SELECT id_usuario FROM usuario WHERE username = %s OR email = %s",
-                "SELECT id FROM usuario WHERE username = %s OR email = %s"
-            ]
-            
-            existing_user = None
-            columna_id = None
-            
-            for consulta in consultas:
-                try:
-                    logger.info(f"🔍 PROBANDO CONSULTA: {consulta}")
-                    cur.execute(consulta, (username, email))
-                    existing_user = cur.fetchone()
-                    if existing_user:
-                        columna_id = 'id_usuario' if 'id_usuario' in consulta else 'id'
-                        break
-                except Exception as e:
-                    logger.warning(f"⚠️ Consulta falló: {consulta} - {e}")
-                    continue
+            # SEGÚN ESQUEMA PDF: nombre_Usuario, correo
+            cur.execute("SELECT id_usuario FROM usuario WHERE nombre_Usuario = %s OR correo = %s", (username, email))
+            existing_user = cur.fetchone()
             
             if existing_user:
-                logger.warning(f"❌ USUARIO O EMAIL YA EXISTEN: {username}, {email}")
+                logger.warning(f"❌ USUARIO O CORREO YA EXISTEN: {username}, {email}")
                 cur.close()
                 conn.close()
                 return jsonify({
                     'success': False,
-                    'message': 'El usuario o email ya existen',
+                    'message': 'El usuario o correo ya existen',
                     'error_code': 'USER_EXISTS',
                     'timestamp': str(datetime.now())
                 }), 409
                 
-            logger.info(f"✅ USUARIO Y EMAIL DISPONIBLES: {username}, {email}")
+            logger.info(f"✅ USUARIO Y CORREO DISPONIBLES: {username}, {email}")
                 
         except Exception as e:
             logger.error(f"❌ ERROR VERIFICANDO USUARIO: {e}")
@@ -478,37 +454,18 @@ def register():
                 'timestamp': str(datetime.now())
             }), 500
 
-        # 6. INSERTAR NUEVO USUARIO - CONSULTA ADAPTATIVA
+        # 5. INSERTAR NUEVO USUARIO - SEGÚN ESQUEMA PDF
         logger.info(f"💾 INSERTANDO NUEVO USUARIO: {username}, {email}")
         try:
-            # Intentar diferentes formatos de INSERT
-            inserciones = [
-                "INSERT INTO usuario (nombre_usuario, email, contraseña) VALUES (%s, %s, %s) RETURNING id_usuario",
-                "INSERT INTO usuario (nombre_usuario, email, contraseña) VALUES (%s, %s, %s) RETURNING id",
-                "INSERT INTO usuario (username, email, password) VALUES (%s, %s, %s) RETURNING id_usuario",
-                "INSERT INTO usuario (username, email, password) VALUES (%s, %s, %s) RETURNING id"
-            ]
+            # SEGÚN ESQUEMA PDF: nombre_Usuario, correo, contraseña
+            cur.execute(
+                "INSERT INTO usuario (nombre_Usuario, correo, contraseña) VALUES (%s, %s, %s) RETURNING id_usuario", 
+                (username, email, password)
+            )
+            user_id = cur.fetchone()[0]
+            conn.commit()
             
-            user_id = None
-            for insercion in inserciones:
-                try:
-                    logger.info(f"💾 INTENTANDO INSERTAR CON: {insercion}")
-                    cur.execute(insercion, (username, email, password))
-                    result = cur.fetchone()
-                    if result:
-                        user_id = result[0]
-                        conn.commit()
-                        logger.info(f"✅ USUARIO INSERTADO CON ÉXITO - ID: {user_id}")
-                        break
-                except Exception as e:
-                    logger.warning(f"⚠️ Inserción falló: {insercion} - {e}")
-                    conn.rollback()
-                    continue
-            
-            if not user_id:
-                raise Exception("Todas las inserciones fallaron")
-            
-            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, USUARIO: {username}, EMAIL: {email}")
+            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, USUARIO: {username}, CORREO: {email}")
             
         except Exception as e:
             logger.error(f"❌ ERROR INSERTANDO USUARIO: {e}")
@@ -522,7 +479,7 @@ def register():
                 'timestamp': str(datetime.now())
             }), 500
 
-        # 7. VERIFICAR INSERCIÓN Y OBTENER ESTADÍSTICAS
+        # 6. VERIFICAR INSERCIÓN Y OBTENER ESTADÍSTICAS
         logger.info("🔍 VERIFICANDO INSERCIÓN...")
         try:
             cur.execute("SELECT COUNT(*) FROM usuario")
@@ -535,7 +492,7 @@ def register():
         cur.close()
         conn.close()
         
-        # 8. RESPUESTA DE ÉXITO
+        # 7. RESPUESTA DE ÉXITO
         logger.info(f"🎉 REGISTRO COMPLETADO EXITOSAMENTE PARA: {username}")
         
         return jsonify({
@@ -560,7 +517,7 @@ def register():
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Login de usuario - VERSIÓN CORREGIDA"""
+    """Login de usuario - CORREGIDO SEGÚN ESQUEMA PDF"""
     try:
         logger.info("🔐 SOLICITUD DE LOGIN RECIBIDA")
         
@@ -602,26 +559,10 @@ def login():
         cur = conn.cursor()
         
         try:
-            # Consulta adaptativa para login
-            consultas = [
-                "SELECT id_usuario, nombre_usuario, email FROM usuario WHERE nombre_usuario = %s AND contraseña = %s",
-                "SELECT id_usuario, nombre_usuario, email FROM usuario WHERE username = %s AND password = %s",
-                "SELECT id, nombre_usuario, email FROM usuario WHERE nombre_usuario = %s AND contraseña = %s",
-                "SELECT id, username, email FROM usuario WHERE username = %s AND password = %s"
-            ]
-            
-            user = None
-            for consulta in consultas:
-                try:
-                    logger.info(f"🔍 PROBANDO LOGIN CON: {consulta}")
-                    cur.execute(consulta, (username, password))
-                    user = cur.fetchone()
-                    if user:
-                        break
-                except Exception as e:
-                    logger.warning(f"⚠️ Consulta login falló: {consulta} - {e}")
-                    continue
-                    
+            # SEGÚN ESQUEMA PDF: nombre_Usuario, contraseña
+            cur.execute("SELECT id_usuario, nombre_Usuario, correo FROM usuario WHERE nombre_Usuario = %s AND contraseña = %s", 
+                       (username, password))
+            user = cur.fetchone()
         except Exception as e:
             logger.error(f"Error en consulta login: {e}")
             cur.close()
@@ -664,7 +605,7 @@ def login():
 
 @app.route('/api/ubicacion-usuario', methods=['POST'])
 def guardar_ubicacion_usuario():
-    """Guardar ubicación del usuario con su ID - VERSIÓN MEJORADA"""
+    """Guardar ubicación del usuario - CORREGIDO SEGÚN ESQUEMA PDF"""
     try:
         logger.info("📍 SOLICITUD DE GUARDAR UBICACIÓN RECIBIDA")
         
@@ -722,53 +663,11 @@ def guardar_ubicacion_usuario():
             
         cur = conn.cursor()
         
-        # Verificar y crear tabla si no existe
-        try:
-            cur.execute("SELECT 1 FROM ubicacion_usuario LIMIT 1")
-            logger.info("✅ TABLA 'ubicacion_usuario' EXISTE Y ES ACCESIBLE")
-        except Exception as e:
-            logger.warning(f"⚠️ TABLA 'ubicacion_usuario' NO EXISTE: {e}")
-            logger.info("📦 CREANDO TABLA 'ubicacion_usuario'...")
-            try:
-                cur.execute("""
-                    CREATE TABLE ubicacion_usuario (
-                        id_ubi_us SERIAL PRIMARY KEY,
-                        id_usuario INT NOT NULL,
-                        latitud DECIMAL(10, 8) NOT NULL,
-                        longitud DECIMAL(11, 8) NOT NULL,
-                        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                conn.commit()
-                logger.info("✅ TABLA 'ubicacion_usuario' CREADA EXITOSAMENTE")
-            except Exception as create_error:
-                logger.error(f"❌ ERROR CREANDO TABLA: {create_error}")
-                cur.close()
-                conn.close()
-                return jsonify({
-                    'success': False,
-                    'message': 'Error creando tabla de ubicaciones',
-                    'error_code': 'TABLE_CREATION_ERROR'
-                }), 500
-
-        # Verificar que el usuario exista
+        # Verificar que el usuario exista - SEGÚN ESQUEMA PDF: id_usuario
         logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO ID: {id_usuario}")
         try:
-            consultas_usuario = [
-                "SELECT id_usuario FROM usuario WHERE id_usuario = %s",
-                "SELECT id FROM usuario WHERE id = %s"
-            ]
-            
-            usuario_existe = None
-            for consulta in consultas_usuario:
-                try:
-                    cur.execute(consulta, (id_usuario,))
-                    usuario_existe = cur.fetchone()
-                    if usuario_existe:
-                        break
-                except Exception as e:
-                    logger.warning(f"⚠️ Consulta usuario falló: {consulta} - {e}")
-                    continue
+            cur.execute("SELECT id_usuario FROM usuario WHERE id_usuario = %s", (id_usuario,))
+            usuario_existe = cur.fetchone()
             
             if not usuario_existe:
                 logger.error(f"❌ USUARIO NO ENCONTRADO: {id_usuario}")
@@ -789,7 +688,7 @@ def guardar_ubicacion_usuario():
                 'error_code': 'USER_VERIFICATION_ERROR'
             }), 500
 
-        # Insertar ubicación
+        # Insertar ubicación - SEGÚN ESQUEMA PDF: id_usuario, latitud, longitud
         logger.info(f"💾 INSERTANDO UBICACIÓN - Usuario: {id_usuario}, Lat: {latitud}, Lng: {longitud}")
         try:
             cur.execute(
@@ -812,21 +711,6 @@ def guardar_ubicacion_usuario():
                 'error_code': 'INSERT_ERROR'
             }), 500
 
-        # Obtener estadísticas
-        logger.info("📊 OBTENIENDO ESTADÍSTICAS...")
-        try:
-            cur.execute("SELECT COUNT(*) FROM ubicacion_usuario WHERE id_usuario = %s", (id_usuario,))
-            total_ubicaciones_usuario = cur.fetchone()[0]
-            
-            cur.execute("SELECT COUNT(*) FROM ubicacion_usuario")
-            total_ubicaciones = cur.fetchone()[0]
-            
-            logger.info(f"📊 Estadísticas - Usuario: {total_ubicaciones_usuario}, Total: {total_ubicaciones}")
-        except Exception as e:
-            logger.warning(f"⚠️ ERROR OBTENIENDO ESTADÍSTICAS: {e}")
-            total_ubicaciones_usuario = 1
-            total_ubicaciones = 1
-        
         cur.close()
         conn.close()
         
@@ -839,10 +723,6 @@ def guardar_ubicacion_usuario():
             'id_usuario': id_usuario,
             'latitud': latitud,
             'longitud': longitud,
-            'estadisticas': {
-                'total_ubicaciones_usuario': total_ubicaciones_usuario,
-                'total_ubicaciones': total_ubicaciones
-            },
             'timestamp': str(datetime.now())
         })
         
@@ -858,7 +738,7 @@ def guardar_ubicacion_usuario():
 
 @app.route("/api/ongs", methods=['GET'])
 def get_ongs():
-    """Obtener ONGs - VERSIÓN MEJORADA"""
+    """Obtener ONGs - CORREGIDO SEGÚN ESQUEMA PDF"""
     try:
         conn = get_db_connection()
         if not conn:
@@ -872,15 +752,6 @@ def get_ongs():
                     'telefono': '55-1234-5678',
                     'estado': 'CDMX',
                     'municipio': 'Ciudad de México'
-                },
-                {
-                    'nom_ong': 'Ecología y Desarrollo',
-                    'latitud': 20.6668,
-                    'longitud': -103.3918,
-                    'tipo': 'Protección del medio ambiente',
-                    'telefono': '33-9876-5432',
-                    'estado': 'Jalisco',
-                    'municipio': 'Guadalajara'
                 }
             ]
             return jsonify({
@@ -892,7 +763,7 @@ def get_ongs():
             
         cur = conn.cursor()
         
-        # Intentar obtener ONGs de la base de datos
+        # Intentar obtener ONGs de la base de datos - SEGÚN ESQUEMA PDF
         try:
             cur.execute("""
                 SELECT nom_ong, latitud, longitud, tipo, telefono, estado, municipio 
@@ -968,8 +839,61 @@ def get_ongs():
             'message': 'ONGs de ejemplo (error general)'
         })
 
-# NO INCLUIR app.run() - RAILWAY USA GUNICORN
-logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE")
+@app.route("/api/municipios", methods=['GET'])
+def get_municipios():
+    """Obtener municipios - NUEVO ENDPOINT SEGÚN ESQUEMA PDF"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({
+                'success': False,
+                'message': 'Error de conexión a la base de datos',
+                'municipios': []
+            }), 500
+            
+        cur = conn.cursor()
+        
+        try:
+            cur.execute("SELECT id_municipio, nom_municipio, nom_estado FROM municipio ORDER BY nom_estado, nom_municipio")
+            municipios_data = cur.fetchall()
+            
+            municipios_list = []
+            for municipio in municipios_data:
+                municipios_list.append({
+                    'id_municipio': municipio[0],
+                    'nom_municipio': municipio[1],
+                    'nom_estado': municipio[2]
+                })
+
+            cur.close()
+            conn.close()
+
+            return jsonify({
+                'success': True, 
+                'municipios': municipios_list, 
+                'count': len(municipios_list),
+                'message': f'Se encontraron {len(municipios_list)} municipios'
+            })
+
+        except Exception as e:
+            logger.error(f"Error obteniendo municipios: {e}")
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'Error obteniendo municipios',
+                'municipios': []
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error en endpoint municipios: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Error del servidor',
+            'municipios': []
+        }), 500
+
+logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - ESQUEMA PDF")
 
 if __name__ == '__main__':
     # Solo para desarrollo local
