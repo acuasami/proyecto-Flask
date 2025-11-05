@@ -76,6 +76,7 @@ def init_database():
                 CREATE TABLE usuario (
                     id SERIAL PRIMARY KEY,
                     nombre VARCHAR(100) UNIQUE NOT NULL,
+                    email VARCHAR(100) UNIQUE NOT NULL,
                     contraseña VARCHAR(100) NOT NULL,
                     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -83,6 +84,23 @@ def init_database():
             logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE")
         else:
             logger.info("✅ TABLA 'usuario' YA EXISTE")
+            # Verificar si la tabla tiene la columna 'email'
+            cur.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='usuario' and column_name='email';
+            """)
+            if not cur.fetchone():
+                logger.info("🔧 ACTUALIZANDO TABLA 'usuario': agregando columna 'email'...")
+                try:
+                    cur.execute("ALTER TABLE usuario ADD COLUMN email VARCHAR(100) UNIQUE NOT NULL DEFAULT 'correo@example.com';")
+                    conn.commit()
+                    logger.info("✅ COLUMNA 'email' AGREGADA A TABLA 'usuario'")
+                except Exception as e:
+                    logger.error(f"❌ ERROR AGREGANDO COLUMNA 'email': {e}")
+                    # Si falla, intentamos recrear la tabla (en desarrollo)
+                    # En producción, se necesitaría una migración más cuidadosa
+                    conn.rollback()
         
         # Verificar tabla ongs
         cur.execute("""
@@ -264,8 +282,8 @@ def init_db():
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    """REGISTRO DE USUARIO - VERSIÓN ULTRA ROBUSTA"""
-    logger.info("🎯 INICIANDO PROCESO DE REGISTRO - VERSIÓN ULTRA ROBUSTA")
+    """REGISTRO DE USUARIO - VERSIÓN CORREGIDA CON EMAIL"""
+    logger.info("🎯 INICIANDO PROCESO DE REGISTRO - VERSIÓN CORREGIDA")
     
     try:
         # 1. OBTENER Y VALIDAR DATOS DE ENTRADA
@@ -291,9 +309,10 @@ def register():
             }), 400
         
         username = data.get('username', '').strip()
+        email = data.get('email', '').strip()
         password = data.get('password', '').strip()
         
-        logger.info(f"🔑 USUARIO: '{username}', LONGITUD PASSWORD: {len(password)}")
+        logger.info(f"🔑 USUARIO: '{username}', EMAIL: '{email}', LONGITUD PASSWORD: {len(password)}")
         
         # 2. VALIDACIONES DE DATOS
         if not username:
@@ -302,6 +321,15 @@ def register():
                 'success': False, 
                 'message': 'El usuario no puede estar vacío',
                 'error_code': 'EMPTY_USERNAME',
+                'timestamp': str(datetime.now())
+            }), 400
+
+        if not email:
+            logger.error("❌ EMAIL VACÍO")
+            return jsonify({
+                'success': False, 
+                'message': 'El email no puede estar vacío',
+                'error_code': 'EMPTY_EMAIL',
                 'timestamp': str(datetime.now())
             }), 400
             
@@ -337,7 +365,7 @@ def register():
             
         cur = conn.cursor()
         
-        # 4. VERIFICAR Y CREAR TABLA SI NO EXISTE - MÉTODO MÁS ROBUSTO
+        # 4. VERIFICAR Y CREAR TABLA SI NO EXISTE
         logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'usuario'...")
         try:
             # Intentar una consulta simple para verificar si la tabla existe
@@ -352,6 +380,7 @@ def register():
                     CREATE TABLE IF NOT EXISTS usuario (
                         id SERIAL PRIMARY KEY,
                         nombre VARCHAR(100) UNIQUE NOT NULL,
+                        email VARCHAR(100) UNIQUE NOT NULL,
                         contraseña VARCHAR(100) NOT NULL,
                         fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -365,82 +394,58 @@ def register():
                 
             except Exception as create_error:
                 logger.error(f"❌ ERROR CRÍTICO CREANDO TABLA: {create_error}")
-                # Intentar método alternativo
-                try:
-                    cur.execute("""
-                        CREATE TABLE usuario (
-                            id SERIAL PRIMARY KEY,
-                            nombre VARCHAR(100) UNIQUE NOT NULL,
-                            contraseña VARCHAR(100) NOT NULL,
-                            fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
-                    conn.commit()
-                    logger.info("✅ TABLA 'usuario' CREADA CON MÉTODO ALTERNATIVO")
-                except Exception as alt_error:
-                    logger.error(f"❌ ERROR EN MÉTODO ALTERNATIVO: {alt_error}")
-                    cur.close()
-                    conn.close()
-                    return jsonify({
-                        'success': False,
-                        'message': 'Error crítico creando tabla de usuarios',
-                        'error_code': 'TABLE_CREATION_ERROR',
-                        'details': str(alt_error),
-                        'timestamp': str(datetime.now())
-                    }), 500
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Error crítico creando tabla de usuarios',
+                    'error_code': 'TABLE_CREATION_ERROR',
+                    'details': str(create_error),
+                    'timestamp': str(datetime.now())
+                }), 500
 
-        # 5. VERIFICAR SI USUARIO EXISTE - CON MÚLTIPLES INTENTOS
-        logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO: {username}")
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                logger.info(f"🔍 INTENTO {attempt + 1} DE {max_attempts}")
-                cur.execute("SELECT id FROM usuario WHERE nombre = %s", (username,))
-                existing_user = cur.fetchone()
+        # 5. VERIFICAR SI USUARIO O EMAIL EXISTEN
+        logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO: {username} Y EMAIL: {email}")
+        try:
+            cur.execute("SELECT id FROM usuario WHERE nombre = %s OR email = %s", (username, email))
+            existing_user = cur.fetchone()
+            
+            if existing_user:
+                logger.warning(f"❌ USUARIO O EMAIL YA EXISTEN: {username}, {email}")
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'El usuario o email ya existen',
+                    'error_code': 'USER_EXISTS',
+                    'timestamp': str(datetime.now())
+                }), 409
                 
-                if existing_user:
-                    logger.warning(f"❌ USUARIO YA EXISTE: {username}")
-                    cur.close()
-                    conn.close()
-                    return jsonify({
-                        'success': False,
-                        'message': 'El usuario ya existe',
-                        'error_code': 'USER_EXISTS',
-                        'timestamp': str(datetime.now())
-                    }), 409
-                    
-                logger.info(f"✅ USUARIO DISPONIBLE: {username}")
-                break  # Salir del bucle si tuvo éxito
+            logger.info(f"✅ USUARIO Y EMAIL DISPONIBLES: {username}, {email}")
                 
-            except Exception as e:
-                logger.error(f"❌ ERROR EN INTENTO {attempt + 1}: {e}")
-                if attempt == max_attempts - 1:  # Último intento
-                    logger.error(f"💥 TODOS LOS INTENTOS FALLARON PARA VERIFICAR USUARIO: {username}")
-                    cur.close()
-                    conn.close()
-                    return jsonify({
-                        'success': False,
-                        'message': 'Error verificando usuario después de múltiples intentos',
-                        'error_code': 'CHECK_USER_ERROR',
-                        'details': str(e),
-                        'attempts': max_attempts,
-                        'timestamp': str(datetime.now())
-                    }), 500
-                # Esperar un poco antes del siguiente intento
-                import time
-                time.sleep(0.5)
+        except Exception as e:
+            logger.error(f"❌ ERROR VERIFICANDO USUARIO: {e}")
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'Error verificando usuario',
+                'error_code': 'CHECK_USER_ERROR',
+                'details': str(e),
+                'timestamp': str(datetime.now())
+            }), 500
 
         # 6. INSERTAR NUEVO USUARIO
-        logger.info(f"💾 INSERTANDO NUEVO USUARIO: {username}")
+        logger.info(f"💾 INSERTANDO NUEVO USUARIO: {username}, {email}")
         try:
             cur.execute(
-                "INSERT INTO usuario (nombre, contraseña) VALUES (%s, %s) RETURNING id", 
-                (username, password)
+                "INSERT INTO usuario (nombre, email, contraseña) VALUES (%s, %s, %s) RETURNING id", 
+                (username, email, password)
             )
             user_id = cur.fetchone()[0]
             conn.commit()
             
-            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, USUARIO: {username}")
+            logger.info(f"✅ USUARIO REGISTRADO EXITOSAMENTE - ID: {user_id}, USUARIO: {username}, EMAIL: {email}")
             
         except Exception as e:
             logger.error(f"❌ ERROR INSERTANDO USUARIO: {e}")
@@ -475,6 +480,7 @@ def register():
             'message': 'Usuario registrado exitosamente',
             'user_id': user_id,
             'username': username,
+            'email': email,
             'total_usuarios': total_usuarios,
             'timestamp': str(datetime.now())
         })
@@ -491,9 +497,20 @@ def register():
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Login de usuario - VERSIÓN SIMPLIFICADA"""
+    """Login de usuario - VERSIÓN CORREGIDA"""
     try:
+        logger.info("🔐 SOLICITUD DE LOGIN RECIBIDA")
+        
+        if not request.is_json:
+            return jsonify({
+                'success': False, 
+                'message': 'Content-Type debe ser application/json',
+                'error_code': 'INVALID_CONTENT_TYPE'
+            }), 400
+        
         data = request.get_json()
+        logger.info(f"📨 DATOS LOGIN RECIBIDOS: {data}")
+        
         if not data:
             return jsonify({
                 'success': False, 
@@ -522,7 +539,7 @@ def login():
         cur = conn.cursor()
         
         try:
-            cur.execute("SELECT id, nombre FROM usuario WHERE nombre = %s AND contraseña = %s", 
+            cur.execute("SELECT id, nombre, email FROM usuario WHERE nombre = %s AND contraseña = %s", 
                        (username, password))
             user = cur.fetchone()
         except Exception as e:
@@ -539,15 +556,18 @@ def login():
         conn.close()
 
         if user:
+            logger.info(f"✅ LOGIN EXITOSO PARA USUARIO: {username}")
             return jsonify({
                 'success': True,
                 'message': 'Login exitoso',
                 'user': {
                     'id': user[0],
-                    'nombre': user[1]
+                    'nombre': user[1],
+                    'email': user[2]
                 }
             })
         else:
+            logger.warning(f"❌ CREDENCIALES INCORRECTAS PARA: {username}")
             return jsonify({
                 'success': False, 
                 'message': 'Credenciales incorrectas',
@@ -564,13 +584,27 @@ def login():
 
 @app.route('/api/ubicacion-usuario', methods=['POST'])
 def guardar_ubicacion_usuario():
-    """Guardar ubicación del usuario con su ID"""
+    """Guardar ubicación del usuario con su ID - VERSIÓN MEJORADA"""
     try:
-        data = request.get_json()
-        if not data:
+        logger.info("📍 SOLICITUD DE GUARDAR UBICACIÓN RECIBIDA")
+        
+        # 1. OBTENER Y VALIDAR DATOS
+        if not request.is_json:
+            logger.error("❌ CONTENT-TYPE NO ES APPLICATION/JSON")
             return jsonify({
                 'success': False, 
-                'message': 'Datos no proporcionados',
+                'message': 'Content-Type debe ser application/json',
+                'error_code': 'INVALID_CONTENT_TYPE'
+            }), 400
+        
+        data = request.get_json()
+        logger.info(f"📨 DATOS UBICACIÓN RECIBIDOS: {data}")
+        
+        if not data:
+            logger.error("❌ NO SE RECIBIERON DATOS JSON")
+            return jsonify({
+                'success': False, 
+                'message': 'No se recibieron datos JSON',
                 'error_code': 'NO_DATA'
             }), 400
         
@@ -578,65 +612,163 @@ def guardar_ubicacion_usuario():
         latitud = data.get('latitud')
         longitud = data.get('longitud')
 
-        if not id_usuario or not latitud or not longitud:
+        # Validar que todos los campos estén presentes
+        if id_usuario is None or latitud is None or longitud is None:
+            logger.error("❌ DATOS INCOMPLETOS")
             return jsonify({
                 'success': False, 
                 'message': 'ID usuario, latitud y longitud requeridos',
                 'error_code': 'MISSING_DATA'
             }), 400
 
-        conn = get_db_connection()
-        if not conn:
+        # Validar tipos de datos
+        try:
+            id_usuario = int(id_usuario)
+            latitud = float(latitud)
+            longitud = float(longitud)
+        except (ValueError, TypeError) as e:
+            logger.error(f"❌ ERROR EN TIPOS DE DATOS: {e}")
             return jsonify({
                 'success': False, 
-                'message': 'Error de conexión a BD',
+                'message': 'ID usuario debe ser entero, latitud y longitud deben ser números',
+                'error_code': 'INVALID_DATA_TYPES'
+            }), 400
+
+        # 2. CONEXIÓN A BASE DE DATOS
+        logger.info("🔌 CONECTANDO A BASE DE DATOS...")
+        conn = get_db_connection()
+        if not conn:
+            logger.error("❌ FALLA CRÍTICA DE CONEXIÓN A BD")
+            return jsonify({
+                'success': False, 
+                'message': 'Error de conexión a la base de datos',
                 'error_code': 'DB_CONNECTION_FAILED'
             }), 500
             
         cur = conn.cursor()
         
-        # Verificar si existe la tabla ubicacion_usuario
+        # 3. VERIFICAR Y CREAR TABLA SI NO EXISTE
+        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'ubicacion_usuario'...")
         try:
             cur.execute("SELECT 1 FROM ubicacion_usuario LIMIT 1")
+            logger.info("✅ TABLA 'ubicacion_usuario' EXISTE Y ES ACCESIBLE")
         except Exception as e:
-            logger.info("📦 Creando tabla 'ubicacion_usuario'...")
-            cur.execute("""
-                CREATE TABLE ubicacion_usuario (
-                    id_ubi_us SERIAL PRIMARY KEY,
-                    id_usuario INT NOT NULL,
-                    latitud DECIMAL(10, 8) NOT NULL,
-                    longitud DECIMAL(11, 8) NOT NULL,
-                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (id_usuario) REFERENCES usuario(id)
-                );
-            """)
-            conn.commit()
-            logger.info("✅ Tabla 'ubicacion_usuario' creada")
+            logger.warning(f"⚠️ TABLA 'ubicacion_usuario' NO EXISTE: {e}")
+            logger.info("📦 CREANDO TABLA 'ubicacion_usuario'...")
+            try:
+                cur.execute("""
+                    CREATE TABLE ubicacion_usuario (
+                        id_ubi_us SERIAL PRIMARY KEY,
+                        id_usuario INT NOT NULL,
+                        latitud DECIMAL(10, 8) NOT NULL,
+                        longitud DECIMAL(11, 8) NOT NULL,
+                        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (id_usuario) REFERENCES usuario(id)
+                    );
+                """)
+                conn.commit()
+                logger.info("✅ TABLA 'ubicacion_usuario' CREADA EXITOSAMENTE")
+            except Exception as create_error:
+                logger.error(f"❌ ERROR CREANDO TABLA: {create_error}")
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Error creando tabla de ubicaciones',
+                    'error_code': 'TABLE_CREATION_ERROR'
+                }), 500
 
-        # Insertar ubicación
-        cur.execute(
-            "INSERT INTO ubicacion_usuario (id_usuario, latitud, longitud) VALUES (%s, %s, %s) RETURNING id_ubi_us",
-            (id_usuario, latitud, longitud)
-        )
-        id_ubi_us = cur.fetchone()[0]
-        conn.commit()
+        # 4. VERIFICAR QUE EL USUARIO EXISTA
+        logger.info(f"🔍 VERIFICANDO EXISTENCIA DE USUARIO ID: {id_usuario}")
+        try:
+            cur.execute("SELECT id FROM usuario WHERE id = %s", (id_usuario,))
+            usuario_existe = cur.fetchone()
+            
+            if not usuario_existe:
+                logger.error(f"❌ USUARIO NO ENCONTRADO: {id_usuario}")
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': f'Usuario con ID {id_usuario} no encontrado',
+                    'error_code': 'USER_NOT_FOUND'
+                }), 404
+        except Exception as e:
+            logger.error(f"❌ ERROR VERIFICANDO USUARIO: {e}")
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'Error verificando usuario',
+                'error_code': 'USER_VERIFICATION_ERROR'
+            }), 500
+
+        # 5. INSERTAR UBICACIÓN
+        logger.info(f"💾 INSERTANDO UBICACIÓN - Usuario: {id_usuario}, Lat: {latitud}, Lng: {longitud}")
+        try:
+            cur.execute(
+                "INSERT INTO ubicacion_usuario (id_usuario, latitud, longitud) VALUES (%s, %s, %s) RETURNING id_ubi_us",
+                (id_usuario, latitud, longitud)
+            )
+            id_ubi_us = cur.fetchone()[0]
+            conn.commit()
+            
+            logger.info(f"✅ UBICACIÓN GUARDADA EXITOSAMENTE - ID Ubicación: {id_ubi_us}")
+            
+        except Exception as e:
+            logger.error(f"❌ ERROR INSERTANDO UBICACIÓN: {e}")
+            conn.rollback()
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': f'Error insertando ubicación: {str(e)}',
+                'error_code': 'INSERT_ERROR'
+            }), 500
+
+        # 6. OBTENER ESTADÍSTICAS
+        logger.info("📊 OBTENIENDO ESTADÍSTICAS...")
+        try:
+            cur.execute("SELECT COUNT(*) FROM ubicacion_usuario WHERE id_usuario = %s", (id_usuario,))
+            total_ubicaciones_usuario = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM ubicacion_usuario")
+            total_ubicaciones = cur.fetchone()[0]
+            
+            logger.info(f"📊 Estadísticas - Usuario: {total_ubicaciones_usuario}, Total: {total_ubicaciones}")
+        except Exception as e:
+            logger.warning(f"⚠️ ERROR OBTENIENDO ESTADÍSTICAS: {e}")
+            total_ubicaciones_usuario = 1
+            total_ubicaciones = 1
         
         cur.close()
         conn.close()
-
+        
+        # 7. RESPUESTA DE ÉXITO
+        logger.info(f"🎉 UBICACIÓN GUARDADA EXITOSAMENTE PARA USUARIO: {id_usuario}")
+        
         return jsonify({
             'success': True,
             'message': 'Ubicación guardada exitosamente',
             'id_ubi_us': id_ubi_us,
+            'id_usuario': id_usuario,
+            'latitud': latitud,
+            'longitud': longitud,
+            'estadisticas': {
+                'total_ubicaciones_usuario': total_ubicaciones_usuario,
+                'total_ubicaciones': total_ubicaciones
+            },
             'timestamp': str(datetime.now())
         })
-
+        
     except Exception as e:
-        logger.error(f"Error guardando ubicación: {e}")
+        logger.error(f"💥 ERROR CRÍTICO NO MANEJADO EN GUARDAR UBICACIÓN: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'success': False, 
-            'message': f'Error del servidor: {str(e)}',
-            'error_code': 'SERVER_ERROR'
+            'message': f'Error crítico del servidor: {str(e)}',
+            'error_code': 'UNHANDLED_ERROR',
+            'timestamp': str(datetime.now())
         }), 500
 
 @app.route("/api/ongs", methods=['GET'])
@@ -707,3 +839,6 @@ def get_ongs():
 # NO INCLUIR app.run() - RAILWAY USA GUNICORN
 logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE")
 
+if __name__ == '__main__':
+    # Solo para desarrollo local
+    app.run(host='0.0.0.0', port=5000, debug=True)
