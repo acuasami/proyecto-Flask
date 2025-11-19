@@ -30,21 +30,36 @@ DB_CONFIG = {
     'password': 'KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'
 }
 
+# --- Reemplaza esto al inicio de tu script ---
+
 def get_db_connection():
-    """Conecta a PostgreSQL con manejo robusto de errores"""
+    """Conecta a PostgreSQL usando las variables de entorno de Railway"""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        # Opción A: Usar la URL completa (Recomendada para Railway)
+        database_url = os.environ.get('DATABASE_URL')
+        
+        if database_url:
+            # Fix para asegurar SSL si la URL no lo tiene
+            if database_url.startswith("postgres://") or database_url.startswith("postgresql://"):
+                 if "?" not in database_url:
+                     database_url += "?sslmode=require"
+            
+            conn = psycopg2.connect(database_url)
+        else:
+            # Opción B: Usar variables individuales (Respaldo)
+            conn = psycopg2.connect(
+                host=os.environ.get('PGHOST'),
+                port=os.environ.get('PGPORT'),
+                database=os.environ.get('PGDATABASE'),
+                user=os.environ.get('PGUSER'),
+                password=os.environ.get('PGPASSWORD'),
+                sslmode='require' # ⚠️ Importante para Railway
+            )
+            
         logger.info("✅ CONEXIÓN BD EXITOSA")
         return conn
-    except psycopg2.OperationalError as e:
-        logger.error(f"❌ ERROR OPERACIONAL BD: {e}")
-        return None
-    except psycopg2.InterfaceError as e:
-        logger.error(f"❌ ERROR INTERFAZ BD: {e}")
-        return None
     except Exception as e:
-        logger.error(f"❌ ERROR INESPERADO BD: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"❌ ERROR CONEXIÓN BD: {e}")
         return None
 
 def init_database():
@@ -898,3 +913,4 @@ logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - ESQUEMA PDF")
 if __name__ == '__main__':
     # Solo para desarrollo local
     app.run(host='0.0.0.0', port=5000, debug=True)
+
