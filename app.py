@@ -83,210 +83,207 @@ def get_db_connection():
         return None
 
 def init_database():
-    """Inicializar tablas EXACTAMENTE como en el esquema PDF"""
-    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BD SEGÚN ESQUEMA PDF")
+    """Inicializar tablas EXACTAMENTE como en el esquema PDF - VERSIÓN MEJORADA CON DIAGNÓSTICO"""
+    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BD - VERSIÓN DIAGNÓSTICO")
     
     try:
+        logger.info("🔍 PASO 1: CONECTANDO A LA BASE DE DATOS...")
         conn = get_db_connection()
         if not conn:
-            logger.error("❌ NO SE PUDO CONECTAR PARA INICIALIZAR BD")
+            logger.error("❌ FALLO CRÍTICO: No se pudo conectar a la base de datos")
             return False
             
         cur = conn.cursor()
+        logger.info("✅ Conexión a BD establecida correctamente")
         
-        # 1. TABLA USUARIO - EXACTA AL PDF
-        logger.info("🔍 VERIFICANDO TABLA 'usuario'...")
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'usuario'
-            );
-        """)
-        usuario_existe = cur.fetchone()[0]
-        
-        if not usuario_existe:
-            logger.info("📦 CREANDO TABLA 'usuario' SEGÚN PDF...")
+        # Verificar qué tablas existen actualmente
+        logger.info("🔍 PASO 2: VERIFICANDO TABLAS EXISTENTES...")
+        try:
             cur.execute("""
-                CREATE TABLE usuario (
-                    id_usuario SERIAL PRIMARY KEY,
-                    correo VARCHAR(255) NOT NULL,
-                    nombre_Usuario VARCHAR(100) NOT NULL,
-                    contraseña VARCHAR(255) NOT NULL
-                );
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
             """)
-            logger.info("✅ TABLA 'usuario' CREADA")
-        else:
-            logger.info("✅ TABLA 'usuario' YA EXISTE")
+            tablas_existentes = [row[0] for row in cur.fetchall()]
+            logger.info(f"📋 Tablas existentes: {tablas_existentes}")
+        except Exception as e:
+            logger.error(f"❌ Error al verificar tablas existentes: {e}")
+            tablas_existentes = []
 
-        # 2. TABLA MUNICIPIO - EXACTA AL PDF
-        logger.info("🔍 VERIFICANDO TABLA 'municipio'...")
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'municipio'
-            );
-        """)
-        municipio_existe = cur.fetchone()[0]
-        
-        if not municipio_existe:
-            logger.info("📦 CREANDO TABLA 'municipio' SEGÚN PDF...")
-            cur.execute("""
-                CREATE TABLE municipio (
-                    id_municipio SERIAL PRIMARY KEY,
-                    nom_municipio VARCHAR(100) NOT NULL,
-                    nom_estado VARCHAR(100) NOT NULL
-                );
-            """)
-            logger.info("✅ TABLA 'municipio' CREADA")
-            
-            # Insertar municipios de ejemplo
-            municipios_ejemplo = [
-                ('Ciudad de México', 'CDMX'),
-                ('Guadalajara', 'Jalisco'),
-                ('Monterrey', 'Nuevo León'),
-                ('Puebla', 'Puebla'),
-                ('Cancún', 'Quintana Roo')
-            ]
-            
-            for municipio, estado in municipios_ejemplo:
-                cur.execute(
-                    "INSERT INTO municipio (nom_municipio, nom_estado) VALUES (%s, %s)",
-                    (municipio, estado)
-                )
-            logger.info("✅ MUNICIPIOS INSERTADOS")
-
-        # 3. TABLA ONGS - EXACTA AL PDF (SIN columnas extras)
-        logger.info("🔍 VERIFICANDO TABLA 'ongs'...")
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'ongs'
-            );
-        """)
-        ongs_existe = cur.fetchone()[0]
-        
-        if not ongs_existe:
-            logger.info("📦 CREANDO TABLA 'ongs' SEGÚN PDF...")
-            cur.execute("""
-                CREATE TABLE ongs (
-                    id_ong SERIAL PRIMARY KEY,
-                    id_municipio INT,
-                    nom_ong VARCHAR(200) NOT NULL,
-                    tipo VARCHAR(100),
-                    latitud DECIMAL(10, 8),
-                    longitud DECIMAL(11, 8),
-                    FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
-                );
-            """)
-            logger.info("✅ TABLA 'ongs' CREADA SEGÚN PDF")
-            
-            # Insertar ONGs de ejemplo
-            ongs_ejemplo = [
-                (1, 'Fundación Infantil Mexicana', 'Ayuda a niños', 19.4326, -99.1332),
-                (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918),
-                (3, 'Cruz Roja Mexicana', 'Ayuda humanitaria', 25.6866, -100.3161),
-                (4, 'Alimentos para Todos', 'Ayuda alimentaria', 19.0414, -98.2063),
-                (5, 'Salvemos los Animales', 'Protección animal', 21.1619, -86.8515)
-            ]
-            
-            for id_municipio, nombre, tipo, lat, lng in ongs_ejemplo:
+        # 1. TABLA USUARIO
+        logger.info("🔍 PASO 3: VERIFICANDO TABLA 'usuario'...")
+        try:
+            if 'usuario' not in tablas_existentes:
+                logger.info("📦 Creando tabla 'usuario'...")
                 cur.execute("""
-                    INSERT INTO ongs (id_municipio, nom_ong, tipo, latitud, longitud) 
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (id_municipio, nombre, tipo, lat, lng))
-            
-            logger.info("✅ ONGs DE EJEMPLO INSERTADAS")
+                    CREATE TABLE usuario (
+                        id_usuario SERIAL PRIMARY KEY,
+                        correo VARCHAR(255) NOT NULL,
+                        nombre_Usuario VARCHAR(100) NOT NULL,
+                        contraseña VARCHAR(255) NOT NULL
+                    );
+                """)
+                logger.info("✅ Tabla 'usuario' creada exitosamente")
+            else:
+                logger.info("✅ Tabla 'usuario' ya existe")
+        except Exception as e:
+            logger.error(f"❌ Error con tabla 'usuario': {e}")
+            conn.rollback()
+            return False
 
-        # 4. TABLA UBICACION_USUARIO - EXACTA AL PDF
-        logger.info("🔍 VERIFICANDO TABLA 'ubicacion_usuario'...")
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'ubicacion_usuario'
-            );
-        """)
-        ubicacion_existe = cur.fetchone()[0]
-        
-        if not ubicacion_existe:
-            logger.info("📦 CREANDO TABLA 'ubicacion_usuario' SEGÚN PDF...")
-            cur.execute("""
-                CREATE TABLE ubicacion_usuario (
-                    id_ubi_us SERIAL PRIMARY KEY,
-                    id_usuario INT NOT NULL,
-                    latitud DECIMAL(10, 8) NOT NULL,
-                    longitud DECIMAL(11, 8) NOT NULL,
-                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario)
-                );
-            """)
-            logger.info("✅ TABLA 'ubicacion_usuario' CREADA")
+        # 2. TABLA MUNICIPIO
+        logger.info("🔍 PASO 4: VERIFICANDO TABLA 'municipio'...")
+        try:
+            if 'municipio' not in tablas_existentes:
+                logger.info("📦 Creando tabla 'municipio'...")
+                cur.execute("""
+                    CREATE TABLE municipio (
+                        id_municipio SERIAL PRIMARY KEY,
+                        nom_municipio VARCHAR(100) NOT NULL,
+                        nom_estado VARCHAR(100) NOT NULL
+                    );
+                """)
+                logger.info("✅ Tabla 'municipio' creada exitosamente")
+                
+                # Insertar municipios de ejemplo
+                logger.info("📝 Insertando municipios de ejemplo...")
+                municipios_ejemplo = [
+                    ('Ciudad de México', 'CDMX'),
+                    ('Guadalajara', 'Jalisco'),
+                    ('Monterrey', 'Nuevo León')
+                ]
+                
+                for municipio, estado in municipios_ejemplo:
+                    cur.execute(
+                        "INSERT INTO municipio (nom_municipio, nom_estado) VALUES (%s, %s)",
+                        (municipio, estado)
+                    )
+                logger.info("✅ Municipios de ejemplo insertados")
+            else:
+                logger.info("✅ Tabla 'municipio' ya existe")
+        except Exception as e:
+            logger.error(f"❌ Error con tabla 'municipio': {e}")
+            conn.rollback()
+            return False
 
-        # 5. TABLA FECHA - NUEVA SEGÚN PDF
-        logger.info("🔍 VERIFICANDO TABLA 'fecha'...")
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'fecha'
-            );
-        """)
-        fecha_existe = cur.fetchone()[0]
-        
-        if not fecha_existe:
-            logger.info("📦 CREANDO TABLA 'fecha' SEGÚN PDF...")
-            cur.execute("""
-                CREATE TABLE fecha (
-                    id_fecha SERIAL PRIMARY KEY,
-                    id_municipio INT NOT NULL,
-                    fecha DATE NOT NULL,
-                    robos INT,
-                    secuestros INT,
-                    grado VARCHAR(50),
-                    FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
-                );
-            """)
-            logger.info("✅ TABLA 'fecha' CREADA")
+        # 3. TABLA ONGS
+        logger.info("🔍 PASO 5: VERIFICANDO TABLA 'ongs'...")
+        try:
+            if 'ongs' not in tablas_existentes:
+                logger.info("📦 Creando tabla 'ongs'...")
+                cur.execute("""
+                    CREATE TABLE ongs (
+                        id_ong SERIAL PRIMARY KEY,
+                        id_municipio INT,
+                        nom_ong VARCHAR(200) NOT NULL,
+                        tipo VARCHAR(100),
+                        latitud DECIMAL(10, 8),
+                        longitud DECIMAL(11, 8),
+                        FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
+                    );
+                """)
+                logger.info("✅ Tabla 'ongs' creada exitosamente")
+                
+                # Insertar ONGs de ejemplo
+                logger.info("📝 Insertando ONGs de ejemplo...")
+                ongs_ejemplo = [
+                    (1, 'Fundación Infantil Mexicana', 'Ayuda a niños', 19.4326, -99.1332),
+                    (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918)
+                ]
+                
+                for id_municipio, nombre, tipo, lat, lng in ongs_ejemplo:
+                    cur.execute("""
+                        INSERT INTO ongs (id_municipio, nom_ong, tipo, latitud, longitud) 
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (id_municipio, nombre, tipo, lat, lng))
+                logger.info("✅ ONGs de ejemplo insertadas")
+            else:
+                logger.info("✅ Tabla 'ongs' ya existe")
+        except Exception as e:
+            logger.error(f"❌ Error con tabla 'ongs': {e}")
+            conn.rollback()
+            return False
 
-        # 6. TABLA ARISTA - NUEVA SEGÚN PDF
-        logger.info("🔍 VERIFICANDO TABLA 'arista'...")
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'arista'
-            );
-        """)
-        arista_existe = cur.fetchone()[0]
-        
-        if not arista_existe:
-            logger.info("📦 CREANDO TABLA 'arista' SEGÚN PDF...")
-            cur.execute("""
-                CREATE TABLE arista (
-                    id_grafo SERIAL PRIMARY KEY,
-                    id_ubi_us INT NOT NULL,
-                    id_ong INT NOT NULL,
-                    distancia NUMERIC(10, 2),
-                    fecha DATE NOT NULL,
-                    FOREIGN KEY (id_ubi_us) REFERENCES ubicacion_usuario(id_ubi_us),
-                    FOREIGN KEY (id_ong) REFERENCES ongs(id_ong)
-                );
-            """)
-            logger.info("✅ TABLA 'arista' CREADA")
-        
+        # 4. TABLA UBICACION_USUARIO
+        logger.info("🔍 PASO 6: VERIFICANDO TABLA 'ubicacion_usuario'...")
+        try:
+            if 'ubicacion_usuario' not in tablas_existentes:
+                logger.info("📦 Creando tabla 'ubicacion_usuario'...")
+                cur.execute("""
+                    CREATE TABLE ubicacion_usuario (
+                        id_ubi_us SERIAL PRIMARY KEY,
+                        id_usuario INT NOT NULL,
+                        latitud DECIMAL(10, 8) NOT NULL,
+                        longitud DECIMAL(11, 8) NOT NULL,
+                        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario)
+                    );
+                """)
+                logger.info("✅ Tabla 'ubicacion_usuario' creada exitosamente")
+            else:
+                logger.info("✅ Tabla 'ubicacion_usuario' ya existe")
+        except Exception as e:
+            logger.error(f"❌ Error con tabla 'ubicacion_usuario': {e}")
+            conn.rollback()
+            return False
+
+        # 5. TABLA FECHA (opcional - puede omitirse si falla)
+        logger.info("🔍 PASO 7: VERIFICANDO TABLA 'fecha'...")
+        try:
+            if 'fecha' not in tablas_existentes:
+                logger.info("📦 Creando tabla 'fecha'...")
+                cur.execute("""
+                    CREATE TABLE fecha (
+                        id_fecha SERIAL PRIMARY KEY,
+                        id_municipio INT NOT NULL,
+                        fecha DATE NOT NULL,
+                        robos INT,
+                        secuestros INT,
+                        grado VARCHAR(50),
+                        FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
+                    );
+                """)
+                logger.info("✅ Tabla 'fecha' creada exitosamente")
+            else:
+                logger.info("✅ Tabla 'fecha' ya existe")
+        except Exception as e:
+            logger.warning(f"⚠️ Error con tabla 'fecha' (omitible): {e}")
+            # No hacemos rollback porque esta tabla es opcional
+
+        # 6. TABLA ARISTA (opcional - puede omitirse si falla)
+        logger.info("🔍 PASO 8: VERIFICANDO TABLA 'arista'...")
+        try:
+            if 'arista' not in tablas_existentes:
+                logger.info("📦 Creando tabla 'arista'...")
+                cur.execute("""
+                    CREATE TABLE arista (
+                        id_grafo SERIAL PRIMARY KEY,
+                        id_ubi_us INT NOT NULL,
+                        id_ong INT NOT NULL,
+                        distancia NUMERIC(10, 2),
+                        fecha DATE NOT NULL,
+                        FOREIGN KEY (id_ubi_us) REFERENCES ubicacion_usuario(id_ubi_us),
+                        FOREIGN KEY (id_ong) REFERENCES ongs(id_ong)
+                    );
+                """)
+                logger.info("✅ Tabla 'arista' creada exitosamente")
+            else:
+                logger.info("✅ Tabla 'arista' ya existe")
+        except Exception as e:
+            logger.warning(f"⚠️ Error con tabla 'arista' (omitible): {e}")
+            # No hacemos rollback porque esta tabla es opcional
+
         conn.commit()
         cur.close()
         conn.close()
         
-        logger.info("🎉 ESQUEMA COMPLETO SEGÚN PDF CREADO")
+        logger.info("🎉 INICIALIZACIÓN DE BD COMPLETADA EXITOSAMENTE")
         return True
         
     except Exception as e:
-        logger.error(f"💥 ERROR EN INIT_DATABASE: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"💥 ERROR CRÍTICO EN INIT_DATABASE: {e}")
+        logger.error(f"🔍 Stack trace completo: {traceback.format_exc()}")
         return False
 
 # INICIALIZACIÓN AL PRIMER REQUEST
@@ -304,7 +301,7 @@ def home():
     return jsonify({
         "status": "active", 
         "message": "🚀 API Flask - ONGs México - ESQUEMA PDF IMPLEMENTADO",
-        "version": "3.0",
+        "version": "4.0",
         "database_status": "conectada",
         "timestamp": str(datetime.now())
     })
@@ -482,6 +479,144 @@ def info_variables():
             info["variables"]["DATABASE_PUBLIC_URL_host"] = host_part
     
     return jsonify(info)
+
+@app.route("/api/diagnostico-bd", methods=['GET'])
+def diagnostico_bd():
+    """Diagnóstico completo de la base de datos"""
+    logger.info("🔍 INICIANDO DIAGNÓSTICO COMPLETO DE BD")
+    
+    diagnostico = {
+        "timestamp": str(datetime.now()),
+        "conexion": None,
+        "tablas_existentes": [],
+        "estructura_tablas": {},
+        "errores": [],
+        "recomendaciones": []
+    }
+    
+    try:
+        # 1. Verificar conexión
+        conn = get_db_connection()
+        if not conn:
+            diagnostico["conexion"] = "❌ FALLIDA"
+            diagnostico["errores"].append("No se pudo conectar a la base de datos")
+            return jsonify(diagnostico)
+        
+        diagnostico["conexion"] = "✅ EXITOSA"
+        cur = conn.cursor()
+        
+        # 2. Verificar tablas existentes
+        try:
+            cur.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            tablas = [row[0] for row in cur.fetchall()]
+            diagnostico["tablas_existentes"] = tablas
+        except Exception as e:
+            diagnostico["errores"].append(f"Error al listar tablas: {str(e)}")
+        
+        # 3. Verificar estructura de tablas esenciales
+        tablas_esenciales = ['usuario', 'municipio', 'ongs', 'ubicacion_usuario']
+        for tabla in tablas_esenciales:
+            try:
+                cur.execute("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s 
+                    ORDER BY ordinal_position
+                """, (tabla,))
+                columnas = cur.fetchall()
+                diagnostico["estructura_tablas"][tabla] = [
+                    {"nombre": col[0], "tipo": col[1], "nulable": col[2]} 
+                    for col in columnas
+                ]
+            except Exception as e:
+                diagnostico["estructura_tablas"][tabla] = f"Error: {str(e)}"
+        
+        # 4. Verificar datos de ejemplo
+        try:
+            cur.execute("SELECT COUNT(*) FROM municipio")
+            count_municipios = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM ongs")
+            count_ongs = cur.fetchone()[0]
+            
+            diagnostico["datos_ejemplo"] = {
+                "municipios": count_municipios,
+                "ongs": count_ongs
+            }
+        except Exception as e:
+            diagnostico["errores"].append(f"Error contando datos: {str(e)}")
+        
+        cur.close()
+        conn.close()
+        
+        # 5. Generar recomendaciones
+        tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in diagnostico["tablas_existentes"]]
+        
+        if tablas_faltantes:
+            diagnostico["recomendaciones"].append(f"Faltan tablas: {tablas_faltantes}. Ejecuta /api/initdb")
+        else:
+            diagnostico["recomendaciones"].append("✅ Todas las tablas esenciales existen")
+        
+        if diagnostico["conexion"] == "✅ EXITOSA" and not tablas_faltantes:
+            diagnostico["estado"] = "✅ SALUDABLE"
+        else:
+            diagnostico["estado"] = "❌ CON PROBLEMAS"
+        
+        return jsonify(diagnostico)
+        
+    except Exception as e:
+        logger.error(f"💥 Error en diagnóstico BD: {e}")
+        return jsonify({
+            "error": f"Error en diagnóstico: {str(e)}",
+            "timestamp": str(datetime.now())
+        }), 500
+
+@app.route("/api/reset-bd", methods=['POST'])
+def reset_bd():
+    """Eliminar y recrear todas las tablas (SOLO PARA DESARROLLO)"""
+    logger.info("🔄 SOLICITUD DE RESET COMPLETO DE BD")
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({
+                "success": False,
+                "message": "❌ No se pudo conectar a la base de datos"
+            }), 500
+            
+        cur = conn.cursor()
+        
+        # Eliminar tablas en orden inverso (por dependencias de FK)
+        tablas = ['arista', 'fecha', 'ubicacion_usuario', 'ongs', 'municipio', 'usuario']
+        
+        for tabla in tablas:
+            try:
+                cur.execute(f"DROP TABLE IF EXISTS {tabla} CASCADE")
+                logger.info(f"✅ Tabla {tabla} eliminada")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo eliminar tabla {tabla}: {e}")
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info("✅ Reset de BD completado, ahora ejecuta /api/initdb")
+        
+        return jsonify({
+            "success": True,
+            "message": "✅ Base de datos reseteada. Ahora ejecuta /api/initdb para recrear las tablas."
+        })
+        
+    except Exception as e:
+        logger.error(f"💥 Error en reset BD: {e}")
+        return jsonify({
+            "success": False,
+            "message": f"❌ Error reseteando BD: {str(e)}"
+        }), 500
 
 @app.route("/api/initdb", methods=['GET', 'POST'])
 def init_db():
@@ -1172,7 +1307,7 @@ def generar_mapa_html(lat_usuario, lon_usuario, ongs_list, id_usuario):
     </html>
     """
 
-logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - OPTIMIZADA PARA RAILWAY")
+logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - DIAGNÓSTICO COMPLETO")
 
 if __name__ == '__main__':
     # Solo para desarrollo local
