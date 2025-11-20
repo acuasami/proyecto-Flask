@@ -290,12 +290,13 @@ def home():
 
 @app.route("/api/health", methods=['GET'])
 def health_check():
-    """Health check COMPLETO con diagnóstico"""
+    """Health check COMPLETO con diagnóstico - CORREGIDO"""
     logger.info("❤️ SOLICITUD HEALTH CHECK")
     
     try:
         conn = get_db_connection()
         if not conn:
+            logger.error("❌ No se pudo conectar a la base de datos")
             return jsonify({
                 "status": "unhealthy",
                 "message": "❌ NO SE PUEDE CONECTAR A LA BASE DE DATOS",
@@ -305,42 +306,64 @@ def health_check():
         
         cur = conn.cursor()
         
-        # Verificar tablas
-        cur.execute("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-        """)
-        tablas = [row[0] for row in cur.fetchall()]
-        logger.info(f"📋 TABLAS ENCONTRADAS: {tablas}")
+        # Verificar tablas con manejo de errores mejorado
+        tablas = []
+        try:
+            cur.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            tablas = [row[0] for row in cur.fetchall()]
+            logger.info(f"📋 TABLAS ENCONTRADAS: {tablas}")
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo tablas: {e}")
+            # Continuar incluso si falla la obtención de tablas
         
-        # Contar registros
+        # Contar registros con manejo robusto de errores
         stats = {}
-        for tabla in ['usuario', 'ongs', 'ubicacion_usuario', 'municipio', 'fecha', 'arista']:
-            if tabla in tablas:
-                cur.execute(f"SELECT COUNT(*) FROM {tabla}")
-                stats[f'total_{tabla}'] = cur.fetchone()[0]
-            else:
-                stats[f'total_{tabla}'] = "tabla_no_existe"
+        tablas_verificar = ['usuario', 'ongs', 'ubicacion_usuario', 'municipio', 'fecha', 'arista']
+        
+        for tabla in tablas_verificar:
+            try:
+                if tabla in tablas:
+                    cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+                    count_result = cur.fetchone()
+                    stats[f'total_{tabla}'] = count_result[0] if count_result else 0
+                else:
+                    stats[f'total_{tabla}'] = "tabla_no_existe"
+            except Exception as e:
+                logger.warning(f"⚠️ Error contando registros en {tabla}: {e}")
+                stats[f'total_{tabla}'] = f"error: {str(e)}"
         
         cur.close()
         conn.close()
         
+        # Verificar el estado general
+        tablas_esenciales = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
+        tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in tablas]
+        
+        estado_general = "healthy" if not tablas_faltantes else "degraded"
+        mensaje_estado = "✅ SISTEMA OPERATIVO" if not tablas_faltantes else f"⚠️ SISTEMA DEGRADADO - Faltan tablas: {tablas_faltantes}"
+        
         return jsonify({
-            "status": "healthy",
-            "message": "✅ SISTEMA OPERATIVO - ESQUEMA PDF",
+            "status": estado_general,
+            "message": mensaje_estado,
             "database_connection": True,
             "tablas": tablas,
             "estadisticas": stats,
+            "tablas_faltantes": tablas_faltantes,
             "timestamp": str(datetime.now())
         })
         
     except Exception as e:
-        logger.error(f"💥 ERROR EN HEALTH CHECK: {e}")
+        logger.error(f"💥 ERROR CRÍTICO EN HEALTH CHECK: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({
             "status": "error",
-            "message": f"❌ ERROR: {str(e)}",
+            "message": f"❌ ERROR INTERNO: {str(e)}",
+            "database_connection": False,
             "timestamp": str(datetime.now())
         }), 500
 
@@ -952,17 +975,6 @@ def mostrar_mapa():
 def generar_mapa_html(lat_usuario, lon_usuario, ongs_list, id_usuario):
     """Generar HTML del mapa con usuario y ONGs"""
     
-    ongs_html = ""
-    for ong in ongs_list:
-        ongs_html += f"""
-        <div class="ong-marker">
-            <h4>🏥 {ong['nombre']}</h4>
-            <p><strong>Tipo:</strong> {ong['tipo']}</p>
-            <p><strong>Ubicación:</strong> {ong['municipio']}, {ong['estado']}</p>
-            <p><strong>Coordenadas:</strong> {ong['lat']:.4f}, {ong['lon']:.4f}</p>
-        </div>
-        """
-    
     # Generar JavaScript para los marcadores de ONGs
     marcadores_js = ""
     for i, ong in enumerate(ongs_list):
@@ -1044,8 +1056,196 @@ def generar_mapa_html(lat_usuario, lon_usuario, ongs_list, id_usuario):
     </html>
     """
 
+@app.route("/api/debug/tablas", methods=['GET'])
+def debug_tablas():
+    """Endpoint de debug para verificar tablas en detalle"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "No se pudo conectar a la BD"}), 500
+            
+        cur = conn.cursor()
+        
+        # Obtener todas las tablas
+        cur.execute("""
+            SELECT table_name, table_type 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """)
+        tablas = [{"nombre": row[0], "tipo": row[1]} for row in cur.fetchall()]
+        
+        # Para cada tabla, obtener su estructura
+        estructuras = {}
+        for tabla in tablas:
+            try:
+                cur.execute("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s 
+                    ORDER BY ordinal_position
+                """, (tabla['nombre'],))
+                columnas = [{"nombre": row[0], "tipo": row[1], "nulable": row[2]} for row in cur.fetchall()]
+                estructuras[tabla['nombre']] = columnas
+            except Exception as e:
+                estructuras[tabla['nombre']] = f"error: {str(e)}"
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "tablas": tablas,
+            "estructuras": estructuras,
+            "total_tablas": len(tablas)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error en debug tablas: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/debug/datos", methods=['GET'])
+def debug_datos():
+    """Endpoint para ver datos de ejemplo de cada tabla"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "No se pudo conectar a la BD"}), 500
+            
+        cur = conn.cursor()
+        
+        datos = {}
+        tablas = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
+        
+        for tabla in tablas:
+            try:
+                cur.execute(f"SELECT * FROM {tabla} LIMIT 5")
+                columnas = [desc[0] for desc in cur.description]
+                filas = cur.fetchall()
+                
+                datos[tabla] = {
+                    "columnas": columnas,
+                    "filas": [dict(zip(columnas, fila)) for fila in filas],
+                    "total": len(filas)
+                }
+            except Exception as e:
+                datos[tabla] = f"error: {str(e)}"
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "datos": datos
+        })
+        
+    except Exception as e:
+        logger.error(f"Error en debug datos: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/verificar-bd", methods=['GET'])
+def verificar_bd_completa():
+    """Verificación completa de la base de datos"""
+    logger.info("🔍 INICIANDO VERIFICACIÓN COMPLETA DE BD")
+    
+    resultados = {
+        "conexion": None,
+        "tablas": {},
+        "errores": [],
+        "recomendaciones": []
+    }
+    
+    try:
+        # 1. Verificar conexión
+        conn = get_db_connection()
+        if not conn:
+            resultados["conexion"] = "❌ FALLÓ"
+            resultados["errores"].append("No se pudo conectar a la base de datos")
+            return jsonify(resultados)
+        
+        resultados["conexion"] = "✅ EXITOSA"
+        cur = conn.cursor()
+        
+        # 2. Verificar tablas esenciales
+        tablas_esenciales = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
+        
+        for tabla in tablas_esenciales:
+            try:
+                cur.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)", (tabla,))
+                existe = cur.fetchone()[0]
+                
+                if existe:
+                    # Contar registros
+                    cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+                    count = cur.fetchone()[0]
+                    resultados["tablas"][tabla] = {
+                        "estado": "✅ EXISTE",
+                        "registros": count
+                    }
+                else:
+                    resultados["tablas"][tabla] = {
+                        "estado": "❌ NO EXISTE", 
+                        "registros": 0
+                    }
+                    resultados["errores"].append(f"Tabla esencial '{tabla}' no existe")
+                    
+            except Exception as e:
+                resultados["tablas"][tabla] = {
+                    "estado": f"❌ ERROR: {str(e)}",
+                    "registros": 0
+                }
+                resultados["errores"].append(f"Error verificando tabla '{tabla}': {str(e)}")
+        
+        # 3. Verificar tablas opcionales
+        tablas_opcionales = ['fecha', 'arista']
+        for tabla in tablas_opcionales:
+            try:
+                cur.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)", (tabla,))
+                existe = cur.fetchone()[0]
+                
+                if existe:
+                    cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+                    count = cur.fetchone()[0]
+                    resultados["tablas"][tabla] = {
+                        "estado": "✅ EXISTE",
+                        "registros": count
+                    }
+                else:
+                    resultados["tablas"][tabla] = {
+                        "estado": "⚠️ NO EXISTE (opcional)",
+                        "registros": 0
+                    }
+                    
+            except Exception as e:
+                resultados["tablas"][tabla] = {
+                    "estado": f"⚠️ ERROR: {str(e)}",
+                    "registros": 0
+                }
+        
+        cur.close()
+        conn.close()
+        
+        # 4. Generar recomendaciones
+        if any("❌" in tabla["estado"] for tabla in resultados["tablas"].values()):
+            resultados["recomendaciones"].append("Ejecuta /api/initdb para inicializar las tablas faltantes")
+        
+        if resultados["conexion"] == "✅ EXITOSA" and not resultados["errores"]:
+            resultados["estado_general"] = "✅ SALUDABLE"
+        else:
+            resultados["estado_general"] = "❌ CON PROBLEMAS"
+        
+        return jsonify(resultados)
+        
+    except Exception as e:
+        logger.error(f"💥 Error en verificación BD: {e}")
+        resultados["errores"].append(f"Error general: {str(e)}")
+        resultados["estado_general"] = "❌ ERROR CRÍTICO"
+        return jsonify(resultados), 500
+
 logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - ESQUEMA PDF COMPLETO")
 
 if __name__ == '__main__':
+    # Solo para desarrollo local
+    app.run(host='0.0.0.0', port=5000, debug=True)
     # Solo para desarrollo local
     app.run(host='0.0.0.0', port=5000, debug=True)
