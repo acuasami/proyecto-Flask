@@ -21,50 +21,49 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-# Configuración Railway - VERIFICADA
-DB_CONFIG = {
-    'host': 'tramway.proxy.rlwy.net',
-    'port': 31631,
-    'database': 'railway',
-    'user': 'postgres',
-    'password': 'KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'
-}
-
-# --- Reemplaza esto al inicio de tu script ---
-
 def get_db_connection():
     """Conecta a PostgreSQL usando las variables de entorno de Railway"""
     try:
-        # Opción A: Usar la URL completa (Recomendada para Railway)
+        # PRIORIDAD 1: Usar DATABASE_URL de Railway (RECOMENDADO)
         database_url = os.environ.get('DATABASE_URL')
         
         if database_url:
-            # Fix para asegurar SSL si la URL no lo tiene
-            if database_url.startswith("postgres://") or database_url.startswith("postgresql://"):
-                 if "?" not in database_url:
-                     database_url += "?sslmode=require"
+            logger.info("🔗 Usando DATABASE_URL de variables de entorno")
+            # Convertir postgres:// a postgresql:// y agregar SSL
+            if database_url.startswith("postgres://"):
+                database_url = database_url.replace("postgres://", "postgresql://", 1)
+            
+            # Asegurar parámetros SSL
+            if "sslmode" not in database_url:
+                separator = "?" if "?" not in database_url else "&"
+                database_url += f"{separator}sslmode=require"
             
             conn = psycopg2.connect(database_url)
-        else:
-            # Opción B: Usar variables individuales (Respaldo)
-            conn = psycopg2.connect(
-                host=os.environ.get('PGHOST'),
-                port=os.environ.get('PGPORT'),
-                database=os.environ.get('PGDATABASE'),
-                user=os.environ.get('PGUSER'),
-                password=os.environ.get('PGPASSWORD'),
-                sslmode='require' # ⚠️ Importante para Railway
-            )
-            
-        logger.info("✅ CONEXIÓN BD EXITOSA")
+            logger.info("✅ CONEXIÓN EXITOSA CON DATABASE_URL")
+            return conn
+        
+        # PRIORIDAD 2: Usar variables individuales de Railway
+        logger.info("🔗 Usando variables individuales de Railway")
+        conn = psycopg2.connect(
+            host=os.environ.get('PGHOST', 'tramway.proxy.rlwy.net'),
+            port=os.environ.get('PGPORT', '31631'),
+            database=os.environ.get('PGDATABASE', 'railway'),
+            user=os.environ.get('PGUSER', 'postgres'),
+            password=os.environ.get('PGPASSWORD', 'KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'),
+            sslmode='require'
+        )
+        logger.info("✅ CONEXIÓN EXITOSA CON VARIABLES INDIVIDUALES")
         return conn
+        
     except Exception as e:
-        logger.error(f"❌ ERROR CONEXIÓN BD: {e}")
+        logger.error(f"❌ ERROR CRÍTICO EN CONEXIÓN BD: {e}")
+        logger.error(f"🔍 DATABASE_URL: {os.environ.get('DATABASE_URL', 'No configurada')}")
+        logger.error(f"🔍 PGHOST: {os.environ.get('PGHOST', 'No configurado')}")
         return None
 
 def init_database():
-    """Inicializar tablas con verificación paso a paso SEGÚN ESQUEMA PDF"""
-    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BASE DE DATOS SEGÚN ESQUEMA PDF")
+    """Inicializar tablas EXACTAMENTE como en el esquema PDF"""
+    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BD SEGÚN ESQUEMA PDF")
     
     try:
         conn = get_db_connection()
@@ -74,8 +73,8 @@ def init_database():
             
         cur = conn.cursor()
         
-        # 1. TABLA USUARIO - SEGÚN ESQUEMA PDF
-        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'usuario'...")
+        # 1. TABLA USUARIO - EXACTA AL PDF
+        logger.info("🔍 VERIFICANDO TABLA 'usuario'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -86,31 +85,21 @@ def init_database():
         usuario_existe = cur.fetchone()[0]
         
         if not usuario_existe:
-            logger.info("📦 CREANDO TABLA 'usuario' SEGÚN ESQUEMA PDF...")
+            logger.info("📦 CREANDO TABLA 'usuario' SEGÚN PDF...")
             cur.execute("""
                 CREATE TABLE usuario (
                     id_usuario SERIAL PRIMARY KEY,
-                    correo VARCHAR(255) UNIQUE NOT NULL,
-                    nombre_Usuario VARCHAR(100) UNIQUE NOT NULL,
-                    contraseña VARCHAR(255) NOT NULL,
-                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    correo VARCHAR(255) NOT NULL,
+                    nombre_Usuario VARCHAR(100) NOT NULL,
+                    contraseña VARCHAR(255) NOT NULL
                 );
             """)
-            logger.info("✅ TABLA 'usuario' CREADA EXITOSAMENTE SEGÚN ESQUEMA PDF")
+            logger.info("✅ TABLA 'usuario' CREADA")
         else:
             logger.info("✅ TABLA 'usuario' YA EXISTE")
-            # Verificar estructura actual
-            cur.execute("""
-                SELECT column_name, data_type, is_nullable 
-                FROM information_schema.columns 
-                WHERE table_name = 'usuario' 
-                ORDER BY ordinal_position;
-            """)
-            columnas = cur.fetchall()
-            logger.info(f"📊 ESTRUCTURA ACTUAL DE 'usuario': {columnas}")
-        
-        # 2. TABLA MUNICIPIO - SEGÚN ESQUEMA PDF
-        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'municipio'...")
+
+        # 2. TABLA MUNICIPIO - EXACTA AL PDF
+        logger.info("🔍 VERIFICANDO TABLA 'municipio'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -121,7 +110,7 @@ def init_database():
         municipio_existe = cur.fetchone()[0]
         
         if not municipio_existe:
-            logger.info("📦 CREANDO TABLA 'municipio' SEGÚN ESQUEMA PDF...")
+            logger.info("📦 CREANDO TABLA 'municipio' SEGÚN PDF...")
             cur.execute("""
                 CREATE TABLE municipio (
                     id_municipio SERIAL PRIMARY KEY,
@@ -129,9 +118,9 @@ def init_database():
                     nom_estado VARCHAR(100) NOT NULL
                 );
             """)
-            logger.info("✅ TABLA 'municipio' CREADA EXITOSAMENTE")
+            logger.info("✅ TABLA 'municipio' CREADA")
             
-            # Insertar algunos municipios de ejemplo
+            # Insertar municipios de ejemplo
             municipios_ejemplo = [
                 ('Ciudad de México', 'CDMX'),
                 ('Guadalajara', 'Jalisco'),
@@ -145,12 +134,10 @@ def init_database():
                     "INSERT INTO municipio (nom_municipio, nom_estado) VALUES (%s, %s)",
                     (municipio, estado)
                 )
-            logger.info("✅ MUNICIPIOS DE EJEMPLO INSERTADOS")
-        else:
-            logger.info("✅ TABLA 'municipio' YA EXISTE")
-        
-        # 3. TABLA ONGs - SEGÚN ESQUEMA PDF
-        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'ongs'...")
+            logger.info("✅ MUNICIPIOS INSERTADOS")
+
+        # 3. TABLA ONGS - EXACTA AL PDF (SIN columnas extras)
+        logger.info("🔍 VERIFICANDO TABLA 'ongs'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -161,7 +148,7 @@ def init_database():
         ongs_existe = cur.fetchone()[0]
         
         if not ongs_existe:
-            logger.info("📦 CREANDO TABLA 'ongs' SEGÚN ESQUEMA PDF...")
+            logger.info("📦 CREANDO TABLA 'ongs' SEGÚN PDF...")
             cur.execute("""
                 CREATE TABLE ongs (
                     id_ong SERIAL PRIMARY KEY,
@@ -170,34 +157,30 @@ def init_database():
                     tipo VARCHAR(100),
                     latitud DECIMAL(10, 8),
                     longitud DECIMAL(11, 8),
-                    telefono VARCHAR(20),
-                    estado VARCHAR(100),
-                    municipio VARCHAR(100),
-                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
                 );
             """)
-            logger.info("✅ TABLA 'ongs' CREADA EXITOSAMENTE SEGÚN ESQUEMA PDF")
+            logger.info("✅ TABLA 'ongs' CREADA SEGÚN PDF")
             
             # Insertar ONGs de ejemplo
             ongs_ejemplo = [
-                (1, 'Fundación Infantil Mexicana', 'Ayuda a niños', 19.4326, -99.1332, '55-1234-5678', 'CDMX', 'Ciudad de México'),
-                (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918, '33-9876-5432', 'Jalisco', 'Guadalajara'),
-                (3, 'Cruz Roja Mexicana', 'Ayuda humanitaria', 25.6866, -100.3161, '81-1111-2222', 'Nuevo León', 'Monterrey')
+                (1, 'Fundación Infantil Mexicana', 'Ayuda a niños', 19.4326, -99.1332),
+                (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918),
+                (3, 'Cruz Roja Mexicana', 'Ayuda humanitaria', 25.6866, -100.3161),
+                (4, 'Alimentos para Todos', 'Ayuda alimentaria', 19.0414, -98.2063),
+                (5, 'Salvemos los Animales', 'Protección animal', 21.1619, -86.8515)
             ]
             
-            for id_municipio, nombre, tipo, lat, lng, tel, estado, municipio in ongs_ejemplo:
+            for id_municipio, nombre, tipo, lat, lng in ongs_ejemplo:
                 cur.execute("""
-                    INSERT INTO ongs (id_municipio, nom_ong, tipo, latitud, longitud, telefono, estado, municipio) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (id_municipio, nombre, tipo, lat, lng, tel, estado, municipio))
+                    INSERT INTO ongs (id_municipio, nom_ong, tipo, latitud, longitud) 
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (id_municipio, nombre, tipo, lat, lng))
             
             logger.info("✅ ONGs DE EJEMPLO INSERTADAS")
-        else:
-            logger.info("✅ TABLA 'ongs' YA EXISTE")
 
-        # 4. TABLA UBICACION_USUARIO - SEGÚN ESQUEMA PDF
-        logger.info("🔍 VERIFICANDO EXISTENCIA DE TABLA 'ubicacion_usuario'...")
+        # 4. TABLA UBICACION_USUARIO - EXACTA AL PDF
+        logger.info("🔍 VERIFICANDO TABLA 'ubicacion_usuario'...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -208,7 +191,7 @@ def init_database():
         ubicacion_existe = cur.fetchone()[0]
         
         if not ubicacion_existe:
-            logger.info("📦 CREANDO TABLA 'ubicacion_usuario' SEGÚN ESQUEMA PDF...")
+            logger.info("📦 CREANDO TABLA 'ubicacion_usuario' SEGÚN PDF...")
             cur.execute("""
                 CREATE TABLE ubicacion_usuario (
                     id_ubi_us SERIAL PRIMARY KEY,
@@ -219,19 +202,69 @@ def init_database():
                     FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario)
                 );
             """)
-            logger.info("✅ TABLA 'ubicacion_usuario' CREADA EXITOSAMENTE SEGÚN ESQUEMA PDF")
-        else:
-            logger.info("✅ TABLA 'ubicacion_usuario' YA EXISTE")
+            logger.info("✅ TABLA 'ubicacion_usuario' CREADA")
+
+        # 5. TABLA FECHA - NUEVA SEGÚN PDF
+        logger.info("🔍 VERIFICANDO TABLA 'fecha'...")
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'fecha'
+            );
+        """)
+        fecha_existe = cur.fetchone()[0]
+        
+        if not fecha_existe:
+            logger.info("📦 CREANDO TABLA 'fecha' SEGÚN PDF...")
+            cur.execute("""
+                CREATE TABLE fecha (
+                    id_fecha SERIAL PRIMARY KEY,
+                    id_municipio INT NOT NULL,
+                    fecha DATE NOT NULL,
+                    robos INT,
+                    secuestros INT,
+                    grado VARCHAR(50),
+                    FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
+                );
+            """)
+            logger.info("✅ TABLA 'fecha' CREADA")
+
+        # 6. TABLA ARISTA - NUEVA SEGÚN PDF
+        logger.info("🔍 VERIFICANDO TABLA 'arista'...")
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'arista'
+            );
+        """)
+        arista_existe = cur.fetchone()[0]
+        
+        if not arista_existe:
+            logger.info("📦 CREANDO TABLA 'arista' SEGÚN PDF...")
+            cur.execute("""
+                CREATE TABLE arista (
+                    id_grafo SERIAL PRIMARY KEY,
+                    id_ubi_us INT NOT NULL,
+                    id_ong INT NOT NULL,
+                    distancia NUMERIC(10, 2),
+                    fecha DATE NOT NULL,
+                    FOREIGN KEY (id_ubi_us) REFERENCES ubicacion_usuario(id_ubi_us),
+                    FOREIGN KEY (id_ong) REFERENCES ongs(id_ong)
+                );
+            """)
+            logger.info("✅ TABLA 'arista' CREADA")
         
         conn.commit()
         cur.close()
         conn.close()
         
-        logger.info("🎉 INICIALIZACIÓN DE BD COMPLETADA SEGÚN ESQUEMA PDF")
+        logger.info("🎉 ESQUEMA COMPLETO SEGÚN PDF CREADO")
         return True
         
     except Exception as e:
-        logger.error(f"💥 ERROR CRÍTICO EN INIT_DATABASE: {e}")
+        logger.error(f"💥 ERROR EN INIT_DATABASE: {e}")
         logger.error(traceback.format_exc())
         return False
 
@@ -250,9 +283,8 @@ def home():
     return jsonify({
         "status": "active", 
         "message": "🚀 API Flask - ONGs México - ESQUEMA PDF IMPLEMENTADO",
-        "version": "13.0",
+        "version": "2.0",
         "database_status": "conectada",
-        "endpoints_available": True,
         "timestamp": str(datetime.now())
     })
 
@@ -285,29 +317,12 @@ def health_check():
         
         # Contar registros
         stats = {}
-        if 'usuario' in tablas:
-            cur.execute("SELECT COUNT(*) FROM usuario")
-            stats['total_usuarios'] = cur.fetchone()[0]
-        else:
-            stats['total_usuarios'] = "tabla_no_existe"
-            
-        if 'ongs' in tablas:
-            cur.execute("SELECT COUNT(*) FROM ongs")
-            stats['total_ongs'] = cur.fetchone()[0]
-        else:
-            stats['total_ongs'] = "tabla_no_existe"
-
-        if 'ubicacion_usuario' in tablas:
-            cur.execute("SELECT COUNT(*) FROM ubicacion_usuario")
-            stats['total_ubicaciones'] = cur.fetchone()[0]
-        else:
-            stats['total_ubicaciones'] = "tabla_no_existe"
-            
-        if 'municipio' in tablas:
-            cur.execute("SELECT COUNT(*) FROM municipio")
-            stats['total_municipios'] = cur.fetchone()[0]
-        else:
-            stats['total_municipios'] = "tabla_no_existe"
+        for tabla in ['usuario', 'ongs', 'ubicacion_usuario', 'municipio', 'fecha', 'arista']:
+            if tabla in tablas:
+                cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+                stats[f'total_{tabla}'] = cur.fetchone()[0]
+            else:
+                stats[f'total_{tabla}'] = "tabla_no_existe"
         
         cur.close()
         conn.close()
@@ -340,7 +355,7 @@ def init_db():
         return jsonify({
             "success": True,
             "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE SEGÚN ESQUEMA PDF",
-            "details": "Tablas 'usuario', 'municipio', 'ongs' y 'ubicacion_usuario' verificadas/creadas",
+            "details": "Todas las tablas del PDF verificadas/creadas",
             "timestamp": str(datetime.now())
         })
     else:
@@ -757,33 +772,22 @@ def get_ongs():
     try:
         conn = get_db_connection()
         if not conn:
-            # Si no hay conexión, devolver ONGs de ejemplo
-            ongs_ejemplo = [
-                {
-                    'nom_ong': 'Fundación Infantil Mexicana',
-                    'latitud': 19.4326,
-                    'longitud': -99.1332,
-                    'tipo': 'Ayuda a niños en situación vulnerable',
-                    'telefono': '55-1234-5678',
-                    'estado': 'CDMX',
-                    'municipio': 'Ciudad de México'
-                }
-            ]
             return jsonify({
                 'success': True, 
-                'ongs': ongs_ejemplo, 
-                'count': len(ongs_ejemplo),
+                'ongs': obtener_ongs_ejemplo(),
                 'message': 'ONGs de ejemplo (sin conexión a BD)'
             })
             
         cur = conn.cursor()
         
-        # Intentar obtener ONGs de la base de datos - SEGÚN ESQUEMA PDF
         try:
+            # ✅ CORREGIDO: JOIN con municipio según esquema PDF
             cur.execute("""
-                SELECT nom_ong, latitud, longitud, tipo, telefono, estado, municipio 
-                FROM ongs 
-                WHERE latitud IS NOT NULL AND longitud IS NOT NULL
+                SELECT o.nom_ong, o.tipo, o.latitud, o.longitud, 
+                       m.nom_municipio, m.nom_estado
+                FROM ongs o
+                LEFT JOIN municipio m ON o.id_municipio = m.id_municipio
+                WHERE o.latitud IS NOT NULL AND o.longitud IS NOT NULL
                 LIMIT 50
             """)
             ongs_data = cur.fetchall()
@@ -792,12 +796,11 @@ def get_ongs():
             for ong in ongs_data:
                 ongs_list.append({
                     'nom_ong': ong[0] or 'Sin nombre',
-                    'latitud': float(ong[1]) if ong[1] else 0.0,
-                    'longitud': float(ong[2]) if ong[2] else 0.0,
-                    'tipo': ong[3] or 'Sin descripción',
-                    'telefono': ong[4] or 'Sin teléfono',
-                    'estado': ong[5] or 'Sin estado',
-                    'municipio': ong[6] or 'Sin municipio'
+                    'tipo': ong[1] or 'Sin descripción',
+                    'latitud': float(ong[2]) if ong[2] else 0.0,
+                    'longitud': float(ong[3]) if ong[3] else 0.0,
+                    'municipio': ong[4] or 'Sin municipio',
+                    'estado': ong[5] or 'Sin estado'
                 })
 
             cur.close()
@@ -812,51 +815,38 @@ def get_ongs():
 
         except Exception as e:
             logger.warning(f"⚠️ Error obteniendo ONGs de BD: {e}")
-            # Si falla, devolver ONGs de ejemplo
-            ongs_ejemplo = [
-                {
-                    'nom_ong': 'Fundación Infantil Mexicana',
-                    'latitud': 19.4326,
-                    'longitud': -99.1332,
-                    'tipo': 'Ayuda a niños en situación vulnerable',
-                    'telefono': '55-1234-5678',
-                    'estado': 'CDMX',
-                    'municipio': 'Ciudad de México'
-                }
-            ]
             cur.close()
             conn.close()
             return jsonify({
                 'success': True, 
-                'ongs': ongs_ejemplo, 
-                'count': len(ongs_ejemplo),
-                'message': 'ONGs de ejemplo (error en BD)'
+                'ongs': obtener_ongs_ejemplo(),
+                'message': 'ONGs de ejemplo (error en consulta)'
             })
 
     except Exception as e:
         logger.error(f"Error obteniendo ONGs: {e}")
-        # Último recurso: ONGs de ejemplo
-        ongs_ejemplo = [
-            {
-                'nom_ong': 'Fundación Infantil Mexicana',
-                'latitud': 19.4326,
-                'longitud': -99.1332,
-                'tipo': 'Ayuda a niños en situación vulnerable',
-                'telefono': '55-1234-5678',
-                'estado': 'CDMX',
-                'municipio': 'Ciudad de México'
-            }
-        ]
         return jsonify({
             'success': True, 
-            'ongs': ongs_ejemplo, 
-            'count': len(ongs_ejemplo),
+            'ongs': obtener_ongs_ejemplo(),
             'message': 'ONGs de ejemplo (error general)'
         })
 
+def obtener_ongs_ejemplo():
+    """ONGs de ejemplo cuando falla la BD"""
+    return [
+        {
+            'nom_ong': 'Fundación Infantil Mexicana',
+            'tipo': 'Ayuda a niños en situación vulnerable',
+            'latitud': 19.4326,
+            'longitud': -99.1332,
+            'municipio': 'Ciudad de México',
+            'estado': 'CDMX'
+        }
+    ]
+
 @app.route("/api/municipios", methods=['GET'])
 def get_municipios():
-    """Obtener municipios - NUEVO ENDPOINT SEGÚN ESQUEMA PDF"""
+    """Obtener municipios - CORREGIDO SEGÚN ESQUEMA PDF"""
     try:
         conn = get_db_connection()
         if not conn:
@@ -908,9 +898,154 @@ def get_municipios():
             'municipios': []
         }), 500
 
-logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - ESQUEMA PDF")
+@app.route("/mapa")
+def mostrar_mapa():
+    """Endpoint para mapa interactivo con Folium"""
+    try:
+        lat = request.args.get('lat', default=19.4326, type=float)
+        lon = request.args.get('lon', default=-99.1332, type=float)
+        id_usuario = request.args.get('id_usuario', default=-1, type=int)
+        
+        logger.info(f"🗺️ Solicitando mapa - Usuario: {id_usuario}, Ubicación: ({lat}, {lon})")
+        
+        # Obtener ONGs de la base de datos
+        conn = get_db_connection()
+        ongs_list = []
+        
+        if conn:
+            cur = conn.cursor()
+            try:
+                cur.execute("""
+                    SELECT o.nom_ong, o.tipo, o.latitud, o.longitud, 
+                           m.nom_municipio, m.nom_estado
+                    FROM ongs o
+                    LEFT JOIN municipio m ON o.id_municipio = m.id_municipio
+                    WHERE o.latitud IS NOT NULL AND o.longitud IS NOT NULL
+                    LIMIT 20
+                """)
+                ongs_data = cur.fetchall()
+                
+                for ong in ongs_data:
+                    ongs_list.append({
+                        'nombre': ong[0],
+                        'tipo': ong[1],
+                        'lat': float(ong[2]),
+                        'lon': float(ong[3]),
+                        'municipio': ong[4],
+                        'estado': ong[5]
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error obteniendo ONGs para mapa: {e}")
+            finally:
+                cur.close()
+                conn.close()
+        
+        # Generar HTML del mapa
+        html_content = generar_mapa_html(lat, lon, ongs_list, id_usuario)
+        return html_content
+        
+    except Exception as e:
+        logger.error(f"💥 Error en endpoint /mapa: {e}")
+        return f"Error cargando mapa: {str(e)}", 500
+
+def generar_mapa_html(lat_usuario, lon_usuario, ongs_list, id_usuario):
+    """Generar HTML del mapa con usuario y ONGs"""
+    
+    ongs_html = ""
+    for ong in ongs_list:
+        ongs_html += f"""
+        <div class="ong-marker">
+            <h4>🏥 {ong['nombre']}</h4>
+            <p><strong>Tipo:</strong> {ong['tipo']}</p>
+            <p><strong>Ubicación:</strong> {ong['municipio']}, {ong['estado']}</p>
+            <p><strong>Coordenadas:</strong> {ong['lat']:.4f}, {ong['lon']:.4f}</p>
+        </div>
+        """
+    
+    # Generar JavaScript para los marcadores de ONGs
+    marcadores_js = ""
+    for i, ong in enumerate(ongs_list):
+        marcadores_js += f"""
+            L.marker([{ong['lat']}, {ong['lon']}])
+                .addTo(map)
+                .bindPopup('<b>🏥 {ong['nombre']}</b><br>{ong['tipo']}<br>{ong['municipio']}, {ong['estado']}');
+        """
+    
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Mapa de ONGs - Usuario {id_usuario}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+        <style>
+            body {{ margin: 0; padding: 0; }}
+            #map {{ height: 100vh; width: 100%; }}
+            .info {{ 
+                position: absolute; 
+                top: 10px; 
+                left: 10px; 
+                background: white; 
+                padding: 15px; 
+                border-radius: 8px;
+                z-index: 1000;
+                max-width: 300px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                font-family: Arial, sans-serif;
+            }}
+            .user-marker {{ color: #007bff; font-weight: bold; }}
+            .ong-marker {{ color: #28a745; }}
+        </style>
+    </head>
+    <body>
+        <div class="info">
+            <h3 class="user-marker">📍 Tu Ubicación</h3>
+            <p><strong>Lat:</strong> {lat_usuario:.6f}</p>
+            <p><strong>Lon:</strong> {lon_usuario:.6f}</p>
+            <p><strong>Usuario ID:</strong> {id_usuario}</p>
+            <p><strong>ONGs cercanas:</strong> {len(ongs_list)}</p>
+        </div>
+        <div id="map"></div>
+        
+        <script>
+            // Inicializar mapa centrado en el usuario
+            var map = L.map('map').setView([{lat_usuario}, {lon_usuario}], 13);
+            
+            // Capa de tiles de OpenStreetMap
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }}).addTo(map);
+            
+            // Marcador del usuario (azul)
+            var userIcon = L.divIcon({{
+                className: 'user-marker',
+                html: '📍<div style="font-size: 12px; margin-top: 5px;">Tú</div>',
+                iconSize: [30, 40],
+                iconAnchor: [15, 40]
+            }});
+            
+            L.marker([{lat_usuario}, {lon_usuario}], {{icon: userIcon}})
+                .addTo(map)
+                .bindPopup('<b class="user-marker">📍 Tu Ubicación</b><br>Usuario ID: {id_usuario}<br>Coordenadas: {lat_usuario:.6f}, {lon_usuario:.6f}')
+                .openPopup();
+            
+            // Marcadores de ONGs (verdes)
+            {marcadores_js}
+            
+            // Ajustar vista para incluir todos los marcadores
+            var group = new L.featureGroup([L.marker([{lat_usuario}, {lon_usuario}])]);
+            map.fitBounds(group.getBounds().pad(0.1));
+            
+        </script>
+    </body>
+    </html>
+    """
+
+logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - ESQUEMA PDF COMPLETO")
 
 if __name__ == '__main__':
     # Solo para desarrollo local
     app.run(host='0.0.0.0', port=5000, debug=True)
-
