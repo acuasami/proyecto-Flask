@@ -22,43 +22,64 @@ app = Flask(__name__)
 CORS(app)
 
 def get_db_connection():
-    """Conecta a PostgreSQL usando las variables de entorno de Railway"""
+    """Conecta a PostgreSQL usando DATABASE_URL de Railway - VERSIÓN CORREGIDA"""
     try:
-        # PRIORIDAD 1: Usar DATABASE_URL de Railway (RECOMENDADO)
+        logger.info("🔍 INICIANDO CONEXIÓN A BD...")
+        
+        # PRIORIDAD 1: Usar DATABASE_URL (URL privada de Railway)
         database_url = os.environ.get('DATABASE_URL')
         
         if database_url:
-            logger.info("🔗 Usando DATABASE_URL de variables de entorno")
-            # Convertir postgres:// a postgresql:// y agregar SSL
-            if database_url.startswith("postgres://"):
-                database_url = database_url.replace("postgres://", "postgresql://", 1)
+            logger.info("🔗 Usando DATABASE_URL (privada)...")
             
-            # Asegurar parámetros SSL
-            if "sslmode" not in database_url:
-                separator = "?" if "?" not in database_url else "&"
-                database_url += f"{separator}sslmode=require"
+            # Ocultar contraseña en logs para seguridad
+            safe_url = database_url
+            if "@" in database_url:
+                safe_url = database_url.split("@")[0] + "@[oculto]"
+            logger.info(f"📋 URL de conexión: {safe_url}")
             
-            conn = psycopg2.connect(database_url)
-            logger.info("✅ CONEXIÓN EXITOSA CON DATABASE_URL")
-            return conn
+            try:
+                conn = psycopg2.connect(database_url)
+                logger.info("✅ CONEXIÓN EXITOSA CON DATABASE_URL")
+                return conn
+            except Exception as e:
+                logger.error(f"❌ Error con DATABASE_URL: {e}")
+                # Continuar con el siguiente método si falla
         
-        # PRIORIDAD 2: Usar variables individuales de Railway
-        logger.info("🔗 Usando variables individuales de Railway")
-        conn = psycopg2.connect(
-            host=os.environ.get('PGHOST', 'tramway.proxy.rlwy.net'),
-            port=os.environ.get('PGPORT', '31631'),
-            database=os.environ.get('PGDATABASE', 'railway'),
-            user=os.environ.get('PGUSER', 'postgres'),
-            password=os.environ.get('PGPASSWORD', 'KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'),
-            sslmode='require'
-        )
-        logger.info("✅ CONEXIÓN EXITOSA CON VARIABLES INDIVIDUALES")
-        return conn
+        # PRIORIDAD 2: Usar DATABASE_PUBLIC_URL como respaldo
+        database_public_url = os.environ.get('DATABASE_PUBLIC_URL')
+        if database_public_url:
+            logger.info("🔗 Intentando con DATABASE_PUBLIC_URL (respaldo)...")
+            
+            try:
+                conn = psycopg2.connect(database_public_url)
+                logger.info("✅ CONEXIÓN EXITOSA CON DATABASE_PUBLIC_URL")
+                logger.warning("⚠️ Usando endpoint público - pueden aplicar cargos por egreso")
+                return conn
+            except Exception as e:
+                logger.error(f"❌ Error con DATABASE_PUBLIC_URL: {e}")
+        
+        # PRIORIDAD 3: Usar configuración directa como último recurso
+        logger.info("🔗 Intentando conexión directa...")
+        try:
+            # Usar la configuración privada de Railway
+            conn = psycopg2.connect(
+                host='postgres.railway.internal',
+                port=5432,
+                database='railway',
+                user='postgres',
+                password='KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'
+            )
+            logger.info("✅ CONEXIÓN EXITOSA CON CONFIGURACIÓN DIRECTA")
+            return conn
+        except Exception as e:
+            logger.error(f"❌ Error con configuración directa: {e}")
+        
+        logger.error("💥 TODOS LOS MÉTODOS DE CONEXIÓN FALLARON")
+        return None
         
     except Exception as e:
-        logger.error(f"❌ ERROR CRÍTICO EN CONEXIÓN BD: {e}")
-        logger.error(f"🔍 DATABASE_URL: {os.environ.get('DATABASE_URL', 'No configurada')}")
-        logger.error(f"🔍 PGHOST: {os.environ.get('PGHOST', 'No configurado')}")
+        logger.error(f"💥 ERROR CRÍTICO EN get_db_connection: {e}")
         return None
 
 def init_database():
@@ -283,89 +304,184 @@ def home():
     return jsonify({
         "status": "active", 
         "message": "🚀 API Flask - ONGs México - ESQUEMA PDF IMPLEMENTADO",
-        "version": "2.0",
+        "version": "3.0",
         "database_status": "conectada",
         "timestamp": str(datetime.now())
     })
 
 @app.route("/api/health", methods=['GET'])
 def health_check():
-    """Health check COMPLETO con diagnóstico - CORREGIDO"""
-    logger.info("❤️ SOLICITUD HEALTH CHECK")
+    """Health check optimizado para Railway"""
+    logger.info("❤️ SOLICITUD HEALTH CHECK - RAILWAY")
     
     try:
-        conn = get_db_connection()
-        if not conn:
-            logger.error("❌ No se pudo conectar a la base de datos")
+        # Verificar conexión usando DATABASE_URL
+        database_url = os.environ.get('DATABASE_URL')
+        if not database_url:
             return jsonify({
                 "status": "unhealthy",
-                "message": "❌ NO SE PUEDE CONECTAR A LA BASE DE DATOS",
+                "message": "❌ DATABASE_URL no configurada",
+                "database_connection": False,
+                "timestamp": str(datetime.now())
+            }), 500
+        
+        conn = psycopg2.connect(database_url)
+        if not conn:
+            return jsonify({
+                "status": "unhealthy",
+                "message": "❌ No se pudo conectar con DATABASE_URL",
                 "database_connection": False,
                 "timestamp": str(datetime.now())
             }), 500
         
         cur = conn.cursor()
         
-        # Verificar tablas con manejo de errores mejorado
-        tablas = []
-        try:
-            cur.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public'
-                ORDER BY table_name
-            """)
-            tablas = [row[0] for row in cur.fetchall()]
-            logger.info(f"📋 TABLAS ENCONTRADAS: {tablas}")
-        except Exception as e:
-            logger.error(f"❌ Error obteniendo tablas: {e}")
-            # Continuar incluso si falla la obtención de tablas
+        # Verificar tablas esenciales
+        cur.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """)
+        tablas = [row[0] for row in cur.fetchall()]
         
-        # Contar registros con manejo robusto de errores
+        # Verificar tablas esenciales según esquema PDF
+        tablas_esenciales = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
+        tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in tablas]
+        
+        # Estadísticas básicas
         stats = {}
-        tablas_verificar = ['usuario', 'ongs', 'ubicacion_usuario', 'municipio', 'fecha', 'arista']
-        
-        for tabla in tablas_verificar:
-            try:
-                if tabla in tablas:
-                    cur.execute(f"SELECT COUNT(*) FROM {tabla}")
-                    count_result = cur.fetchone()
-                    stats[f'total_{tabla}'] = count_result[0] if count_result else 0
-                else:
-                    stats[f'total_{tabla}'] = "tabla_no_existe"
-            except Exception as e:
-                logger.warning(f"⚠️ Error contando registros en {tabla}: {e}")
-                stats[f'total_{tabla}'] = f"error: {str(e)}"
+        for tabla in tablas_esenciales:
+            if tabla in tablas:
+                cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+                stats[f'total_{tabla}'] = cur.fetchone()[0]
+            else:
+                stats[f'total_{tabla}'] = "no_existe"
         
         cur.close()
         conn.close()
         
-        # Verificar el estado general
-        tablas_esenciales = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
-        tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in tablas]
-        
-        estado_general = "healthy" if not tablas_faltantes else "degraded"
-        mensaje_estado = "✅ SISTEMA OPERATIVO" if not tablas_faltantes else f"⚠️ SISTEMA DEGRADADO - Faltan tablas: {tablas_faltantes}"
+        # Determinar estado
+        if not tablas_faltantes:
+            estado = "healthy"
+            mensaje = "✅ SISTEMA OPERATIVO - ESQUEMA PDF"
+        else:
+            estado = "degraded"
+            mensaje = f"⚠️ SISTEMA DEGRADADO - Faltan: {tablas_faltantes}"
         
         return jsonify({
-            "status": estado_general,
-            "message": mensaje_estado,
+            "status": estado,
+            "message": mensaje,
             "database_connection": True,
-            "tablas": tablas,
-            "estadisticas": stats,
+            "connection_type": "DATABASE_URL (privada)",
+            "tablas_esenciales": tablas_esenciales,
             "tablas_faltantes": tablas_faltantes,
+            "estadisticas": stats,
             "timestamp": str(datetime.now())
         })
         
     except Exception as e:
-        logger.error(f"💥 ERROR CRÍTICO EN HEALTH CHECK: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"💥 ERROR EN HEALTH CHECK: {e}")
         return jsonify({
             "status": "error",
-            "message": f"❌ ERROR INTERNO: {str(e)}",
+            "message": f"❌ ERROR: {str(e)}",
             "database_connection": False,
             "timestamp": str(datetime.now())
         }), 500
+
+@app.route("/api/verificar-conexion", methods=['GET'])
+def verificar_conexion():
+    """Verificar específicamente la conexión a la base de datos"""
+    logger.info("🔍 VERIFICANDO CONEXIÓN A BD...")
+    
+    resultado = {
+        "timestamp": str(datetime.now()),
+        "metodos_intentados": [],
+        "conexion_exitosa": False,
+        "url_utilizada": None,
+        "error": None
+    }
+    
+    # Método 1: DATABASE_URL
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        resultado["metodos_intentados"].append("DATABASE_URL (privada)")
+        try:
+            conn = psycopg2.connect(database_url)
+            conn.close()
+            resultado["conexion_exitosa"] = True
+            resultado["url_utilizada"] = "DATABASE_URL (privada)"
+            logger.info("✅ VERIFICACIÓN: Conexión exitosa con DATABASE_URL")
+            return jsonify(resultado)
+        except Exception as e:
+            resultado["error"] = f"DATABASE_URL falló: {str(e)}"
+            logger.error(f"❌ DATABASE_URL falló: {e}")
+    
+    # Método 2: DATABASE_PUBLIC_URL
+    database_public_url = os.environ.get('DATABASE_PUBLIC_URL')
+    if database_public_url:
+        resultado["metodos_intentados"].append("DATABASE_PUBLIC_URL (pública)")
+        try:
+            conn = psycopg2.connect(database_public_url)
+            conn.close()
+            resultado["conexion_exitosa"] = True
+            resultado["url_utilizada"] = "DATABASE_PUBLIC_URL (pública)"
+            logger.info("✅ VERIFICACIÓN: Conexión exitosa con DATABASE_PUBLIC_URL")
+            return jsonify(resultado)
+        except Exception as e:
+            resultado["error"] = f"DATABASE_PUBLIC_URL falló: {str(e)}"
+            logger.error(f"❌ DATABASE_PUBLIC_URL falló: {e}")
+    
+    # Método 3: Configuración directa
+    resultado["metodos_intentados"].append("Configuración directa")
+    try:
+        conn = psycopg2.connect(
+            host='postgres.railway.internal',
+            port=5432,
+            database='railway',
+            user='postgres',
+            password='KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ'
+        )
+        conn.close()
+        resultado["conexion_exitosa"] = True
+        resultado["url_utilizada"] = "Configuración directa"
+        logger.info("✅ VERIFICACIÓN: Conexión exitosa con configuración directa")
+        return jsonify(resultado)
+    except Exception as e:
+        resultado["error"] = f"Configuración directa falló: {str(e)}"
+        logger.error(f"❌ Configuración directa falló: {e}")
+    
+    return jsonify(resultado), 500
+
+@app.route("/api/info-variables", methods=['GET'])
+def info_variables():
+    """Mostrar información sobre las variables de entorno (sin exponer contraseñas)"""
+    database_url = os.environ.get('DATABASE_URL')
+    database_public_url = os.environ.get('DATABASE_PUBLIC_URL')
+    
+    info = {
+        "timestamp": str(datetime.now()),
+        "variables": {
+            "DATABASE_URL_existe": bool(database_url),
+            "DATABASE_URL_host": None,
+            "DATABASE_PUBLIC_URL_existe": bool(database_public_url),
+            "DATABASE_PUBLIC_URL_host": None
+        },
+        "recomendacion": "Usar DATABASE_URL para evitar cargos por egreso"
+    }
+    
+    if database_url:
+        # Extraer host de forma segura
+        if "@" in database_url and ":" in database_url:
+            host_part = database_url.split("@")[1].split(":")[0]
+            info["variables"]["DATABASE_URL_host"] = host_part
+    
+    if database_public_url:
+        if "@" in database_public_url and ":" in database_public_url:
+            host_part = database_public_url.split("@")[1].split(":")[0]
+            info["variables"]["DATABASE_PUBLIC_URL_host"] = host_part
+    
+    return jsonify(info)
 
 @app.route("/api/initdb", methods=['GET', 'POST'])
 def init_db():
@@ -1056,196 +1172,8 @@ def generar_mapa_html(lat_usuario, lon_usuario, ongs_list, id_usuario):
     </html>
     """
 
-@app.route("/api/debug/tablas", methods=['GET'])
-def debug_tablas():
-    """Endpoint de debug para verificar tablas en detalle"""
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "No se pudo conectar a la BD"}), 500
-            
-        cur = conn.cursor()
-        
-        # Obtener todas las tablas
-        cur.execute("""
-            SELECT table_name, table_type 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-        """)
-        tablas = [{"nombre": row[0], "tipo": row[1]} for row in cur.fetchall()]
-        
-        # Para cada tabla, obtener su estructura
-        estructuras = {}
-        for tabla in tablas:
-            try:
-                cur.execute("""
-                    SELECT column_name, data_type, is_nullable 
-                    FROM information_schema.columns 
-                    WHERE table_name = %s 
-                    ORDER BY ordinal_position
-                """, (tabla['nombre'],))
-                columnas = [{"nombre": row[0], "tipo": row[1], "nulable": row[2]} for row in cur.fetchall()]
-                estructuras[tabla['nombre']] = columnas
-            except Exception as e:
-                estructuras[tabla['nombre']] = f"error: {str(e)}"
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            "success": True,
-            "tablas": tablas,
-            "estructuras": estructuras,
-            "total_tablas": len(tablas)
-        })
-        
-    except Exception as e:
-        logger.error(f"Error en debug tablas: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/debug/datos", methods=['GET'])
-def debug_datos():
-    """Endpoint para ver datos de ejemplo de cada tabla"""
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "No se pudo conectar a la BD"}), 500
-            
-        cur = conn.cursor()
-        
-        datos = {}
-        tablas = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
-        
-        for tabla in tablas:
-            try:
-                cur.execute(f"SELECT * FROM {tabla} LIMIT 5")
-                columnas = [desc[0] for desc in cur.description]
-                filas = cur.fetchall()
-                
-                datos[tabla] = {
-                    "columnas": columnas,
-                    "filas": [dict(zip(columnas, fila)) for fila in filas],
-                    "total": len(filas)
-                }
-            except Exception as e:
-                datos[tabla] = f"error: {str(e)}"
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            "success": True,
-            "datos": datos
-        })
-        
-    except Exception as e:
-        logger.error(f"Error en debug datos: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/verificar-bd", methods=['GET'])
-def verificar_bd_completa():
-    """Verificación completa de la base de datos"""
-    logger.info("🔍 INICIANDO VERIFICACIÓN COMPLETA DE BD")
-    
-    resultados = {
-        "conexion": None,
-        "tablas": {},
-        "errores": [],
-        "recomendaciones": []
-    }
-    
-    try:
-        # 1. Verificar conexión
-        conn = get_db_connection()
-        if not conn:
-            resultados["conexion"] = "❌ FALLÓ"
-            resultados["errores"].append("No se pudo conectar a la base de datos")
-            return jsonify(resultados)
-        
-        resultados["conexion"] = "✅ EXITOSA"
-        cur = conn.cursor()
-        
-        # 2. Verificar tablas esenciales
-        tablas_esenciales = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
-        
-        for tabla in tablas_esenciales:
-            try:
-                cur.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)", (tabla,))
-                existe = cur.fetchone()[0]
-                
-                if existe:
-                    # Contar registros
-                    cur.execute(f"SELECT COUNT(*) FROM {tabla}")
-                    count = cur.fetchone()[0]
-                    resultados["tablas"][tabla] = {
-                        "estado": "✅ EXISTE",
-                        "registros": count
-                    }
-                else:
-                    resultados["tablas"][tabla] = {
-                        "estado": "❌ NO EXISTE", 
-                        "registros": 0
-                    }
-                    resultados["errores"].append(f"Tabla esencial '{tabla}' no existe")
-                    
-            except Exception as e:
-                resultados["tablas"][tabla] = {
-                    "estado": f"❌ ERROR: {str(e)}",
-                    "registros": 0
-                }
-                resultados["errores"].append(f"Error verificando tabla '{tabla}': {str(e)}")
-        
-        # 3. Verificar tablas opcionales
-        tablas_opcionales = ['fecha', 'arista']
-        for tabla in tablas_opcionales:
-            try:
-                cur.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)", (tabla,))
-                existe = cur.fetchone()[0]
-                
-                if existe:
-                    cur.execute(f"SELECT COUNT(*) FROM {tabla}")
-                    count = cur.fetchone()[0]
-                    resultados["tablas"][tabla] = {
-                        "estado": "✅ EXISTE",
-                        "registros": count
-                    }
-                else:
-                    resultados["tablas"][tabla] = {
-                        "estado": "⚠️ NO EXISTE (opcional)",
-                        "registros": 0
-                    }
-                    
-            except Exception as e:
-                resultados["tablas"][tabla] = {
-                    "estado": f"⚠️ ERROR: {str(e)}",
-                    "registros": 0
-                }
-        
-        cur.close()
-        conn.close()
-        
-        # 4. Generar recomendaciones
-        if any("❌" in tabla["estado"] for tabla in resultados["tablas"].values()):
-            resultados["recomendaciones"].append("Ejecuta /api/initdb para inicializar las tablas faltantes")
-        
-        if resultados["conexion"] == "✅ EXITOSA" and not resultados["errores"]:
-            resultados["estado_general"] = "✅ SALUDABLE"
-        else:
-            resultados["estado_general"] = "❌ CON PROBLEMAS"
-        
-        return jsonify(resultados)
-        
-    except Exception as e:
-        logger.error(f"💥 Error en verificación BD: {e}")
-        resultados["errores"].append(f"Error general: {str(e)}")
-        resultados["estado_general"] = "❌ ERROR CRÍTICO"
-        return jsonify(resultados), 500
-
-logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - ESQUEMA PDF COMPLETO")
+logger.info("✅ APLICACIÓN FLASK CARGADA CORRECTAMENTE - OPTIMIZADA PARA RAILWAY")
 
 if __name__ == '__main__':
-    # Solo para desarrollo local
-    app.run(host='0.0.0.0', port=5000, debug=True)
     # Solo para desarrollo local
     app.run(host='0.0.0.0', port=5000, debug=True)
