@@ -21,28 +21,32 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# Variable global para evitar múltiples inicializaciones
+db_initialized = False
+
 def get_db_connection():
-    """Conecta a PostgreSQL - VERSIÓN CORREGIDA CON TU URL"""
+    """Conecta a PostgreSQL - VERSIÓN MEJORADA"""
     try:
         logger.info("🔍 INICIANDO CONEXIÓN A BD...")
         
-        # PRIMERO: Variable de entorno de Railway
+        # PRIMERO: Variable de entorno de Railway (con verificación mejorada)
         database_url = os.environ.get('DATABASE_URL')
         
-        if database_url:
+        if database_url and database_url.startswith('postgresql://'):
             logger.info("🔗 Usando DATABASE_URL de Railway...")
             try:
-                conn = psycopg2.connect(database_url)
+                conn = psycopg2.connect(database_url, connect_timeout=10)
                 logger.info("✅ CONEXIÓN EXITOSA CON DATABASE_URL")
                 return conn
             except Exception as e:
                 logger.error(f"❌ Error con DATABASE_URL: {e}")
         
-        # SEGUNDO: Fallback con TU URL específica
+        # SEGUNDO: Fallback con URL específica
         logger.info("🔗 Usando URL específica de tu base de datos...")
         try:
             conn = psycopg2.connect(
-                "postgresql://postgres:KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ@switchyard.proxy.rlwy.net:13155/railway"
+                "postgresql://postgres:KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ@switchyard.proxy.rlwy.net:13155/railway",
+                connect_timeout=10
             )
             logger.info("✅ CONEXIÓN EXITOSA CON URL ESPECÍFICA")
             return conn
@@ -57,71 +61,50 @@ def get_db_connection():
         return None
 
 def init_database():
-    """Inicializar tablas EXACTAMENTE como en el esquema PDF - VERSIÓN MEJORADA CON DIAGNÓSTICO"""
-    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BD - VERSIÓN DIAGNÓSTICO")
+    """Inicializar tablas - VERSIÓN CORREGIDA"""
+    global db_initialized
+    
+    logger.info("🔄 INICIANDO INICIALIZACIÓN DE BD - VERSIÓN CORREGIDA")
     
     try:
-        logger.info("🔍 PASO 1: CONECTANDO A LA BASE DE DATOS...")
         conn = get_db_connection()
         if not conn:
-            logger.error("❌ FALLO CRÍTICO: No se pudo conectar a la base de datos")
+            logger.error("❌ No se pudo conectar a la base de datos")
             return False
             
         cur = conn.cursor()
-        logger.info("✅ Conexión a BD establecida correctamente")
         
-        # Verificar qué tablas existen actualmente
-        logger.info("🔍 PASO 2: VERIFICANDO TABLAS EXISTENTES...")
+        # TABLA USUARIO
         try:
             cur.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public'
-                ORDER BY table_name
+                CREATE TABLE IF NOT EXISTS usuario (
+                    id_usuario SERIAL PRIMARY KEY,
+                    correo VARCHAR(255) NOT NULL,
+                    nombre_Usuario VARCHAR(100) NOT NULL,
+                    contraseña VARCHAR(255) NOT NULL
+                );
             """)
-            tablas_existentes = [row[0] for row in cur.fetchall()]
-            logger.info(f"📋 Tablas existentes: {tablas_existentes}")
-        except Exception as e:
-            logger.error(f"❌ Error al verificar tablas existentes: {e}")
-            tablas_existentes = []
-
-        # 1. TABLA USUARIO
-        logger.info("🔍 PASO 3: VERIFICANDO TABLA 'usuario'...")
-        try:
-            if 'usuario' not in tablas_existentes:
-                logger.info("📦 Creando tabla 'usuario'...")
-                cur.execute("""
-                    CREATE TABLE usuario (
-                        id_usuario SERIAL PRIMARY KEY,
-                        correo VARCHAR(255) NOT NULL,
-                        nombre_Usuario VARCHAR(100) NOT NULL,
-                        contraseña VARCHAR(255) NOT NULL
-                    );
-                """)
-                logger.info("✅ Tabla 'usuario' creada exitosamente")
-            else:
-                logger.info("✅ Tabla 'usuario' ya existe")
+            logger.info("✅ Tabla 'usuario' verificada/creada")
         except Exception as e:
             logger.error(f"❌ Error con tabla 'usuario': {e}")
             conn.rollback()
             return False
 
-        # 2. TABLA MUNICIPIO
-        logger.info("🔍 PASO 4: VERIFICANDO TABLA 'municipio'...")
+        # TABLA MUNICIPIO
         try:
-            if 'municipio' not in tablas_existentes:
-                logger.info("📦 Creando tabla 'municipio'...")
-                cur.execute("""
-                    CREATE TABLE municipio (
-                        id_municipio SERIAL PRIMARY KEY,
-                        nom_municipio VARCHAR(100) NOT NULL,
-                        nom_estado VARCHAR(100) NOT NULL
-                    );
-                """)
-                logger.info("✅ Tabla 'municipio' creada exitosamente")
-                
-                # Insertar municipios de ejemplo
-                logger.info("📝 Insertando municipios de ejemplo...")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS municipio (
+                    id_municipio SERIAL PRIMARY KEY,
+                    nom_municipio VARCHAR(100) NOT NULL,
+                    nom_estado VARCHAR(100) NOT NULL
+                );
+            """)
+            logger.info("✅ Tabla 'municipio' verificada/creada")
+            
+            # Verificar si ya hay datos
+            cur.execute("SELECT COUNT(*) FROM municipio")
+            count = cur.fetchone()[0]
+            if count == 0:
                 municipios_ejemplo = [
                     ('Ciudad de México', 'CDMX'),
                     ('Guadalajara', 'Jalisco'),
@@ -134,36 +117,36 @@ def init_database():
                         (municipio, estado)
                     )
                 logger.info("✅ Municipios de ejemplo insertados")
-            else:
-                logger.info("✅ Tabla 'municipio' ya existe")
+                
         except Exception as e:
             logger.error(f"❌ Error con tabla 'municipio': {e}")
             conn.rollback()
             return False
 
-        # 3. TABLA ONGS
-        logger.info("🔍 PASO 5: VERIFICANDO TABLA 'ongs'...")
+        # TABLA ONGS
         try:
-            if 'ongs' not in tablas_existentes:
-                logger.info("📦 Creando tabla 'ongs'...")
-                cur.execute("""
-                    CREATE TABLE ongs (
-                        id_ong SERIAL PRIMARY KEY,
-                        id_municipio INT,
-                        nom_ong VARCHAR(200) NOT NULL,
-                        tipo VARCHAR(100),
-                        latitud DECIMAL(10, 8),
-                        longitud DECIMAL(11, 8),
-                        FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
-                    );
-                """)
-                logger.info("✅ Tabla 'ongs' creada exitosamente")
-                
-                # Insertar ONGs de ejemplo
-                logger.info("📝 Insertando ONGs de ejemplo...")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ongs (
+                    id_ong SERIAL PRIMARY KEY,
+                    id_municipio INT,
+                    nom_ong VARCHAR(200) NOT NULL,
+                    tipo VARCHAR(100),
+                    latitud DECIMAL(10, 8),
+                    longitud DECIMAL(11, 8),
+                    FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
+                );
+            """)
+            logger.info("✅ Tabla 'ongs' verificada/creada")
+            
+            # Verificar si ya hay datos
+            cur.execute("SELECT COUNT(*) FROM ongs")
+            count = cur.fetchone()[0]
+            if count == 0:
                 ongs_ejemplo = [
                     (1, 'Fundación Infantil Mexicana', 'Ayuda a niños', 19.4326, -99.1332),
-                    (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918)
+                    (2, 'Ecología y Desarrollo', 'Protección ambiental', 20.6668, -103.3918),
+                    (1, 'Casa de la Amistad para Niños con Cáncer', 'Salud infantil', 19.4345, -99.1350),
+                    (3, 'Refugio Animal Monterrey', 'Protección animal', 25.6866, -100.3161)
                 ]
                 
                 for id_municipio, nombre, tipo, lat, lng in ongs_ejemplo:
@@ -172,86 +155,68 @@ def init_database():
                         VALUES (%s, %s, %s, %s, %s)
                     """, (id_municipio, nombre, tipo, lat, lng))
                 logger.info("✅ ONGs de ejemplo insertadas")
-            else:
-                logger.info("✅ Tabla 'ongs' ya existe")
+                
         except Exception as e:
             logger.error(f"❌ Error con tabla 'ongs': {e}")
             conn.rollback()
             return False
 
-        # 4. TABLA UBICACION_USUARIO
-        logger.info("🔍 PASO 6: VERIFICANDO TABLA 'ubicacion_usuario'...")
+        # TABLA UBICACION_USUARIO
         try:
-            if 'ubicacion_usuario' not in tablas_existentes:
-                logger.info("📦 Creando tabla 'ubicacion_usuario'...")
-                cur.execute("""
-                    CREATE TABLE ubicacion_usuario (
-                        id_ubi_us SERIAL PRIMARY KEY,
-                        id_usuario INT NOT NULL,
-                        latitud DECIMAL(10, 8) NOT NULL,
-                        longitud DECIMAL(11, 8) NOT NULL,
-                        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario)
-                    );
-                """)
-                logger.info("✅ Tabla 'ubicacion_usuario' creada exitosamente")
-            else:
-                logger.info("✅ Tabla 'ubicacion_usuario' ya existe")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ubicacion_usuario (
+                    id_ubi_us SERIAL PRIMARY KEY,
+                    id_usuario INT NOT NULL,
+                    latitud DECIMAL(10, 8) NOT NULL,
+                    longitud DECIMAL(11, 8) NOT NULL,
+                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario)
+                );
+            """)
+            logger.info("✅ Tabla 'ubicacion_usuario' verificada/creada")
         except Exception as e:
             logger.error(f"❌ Error con tabla 'ubicacion_usuario': {e}")
             conn.rollback()
             return False
 
-        # 5. TABLA FECHA (opcional - puede omitirse si falla)
-        logger.info("🔍 PASO 7: VERIFICANDO TABLA 'fecha'...")
+        # TABLAS OPCIONALES
         try:
-            if 'fecha' not in tablas_existentes:
-                logger.info("📦 Creando tabla 'fecha'...")
-                cur.execute("""
-                    CREATE TABLE fecha (
-                        id_fecha SERIAL PRIMARY KEY,
-                        id_municipio INT NOT NULL,
-                        fecha DATE NOT NULL,
-                        robos INT,
-                        secuestros INT,
-                        grado VARCHAR(50),
-                        FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
-                    );
-                """)
-                logger.info("✅ Tabla 'fecha' creada exitosamente")
-            else:
-                logger.info("✅ Tabla 'fecha' ya existe")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS fecha (
+                    id_fecha SERIAL PRIMARY KEY,
+                    id_municipio INT NOT NULL,
+                    fecha DATE NOT NULL,
+                    robos INT,
+                    secuestros INT,
+                    grado VARCHAR(50),
+                    FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio)
+                );
+            """)
+            logger.info("✅ Tabla 'fecha' verificada/creada")
         except Exception as e:
             logger.warning(f"⚠️ Error con tabla 'fecha' (omitible): {e}")
-            # No hacemos rollback porque esta tabla es opcional
 
-        # 6. TABLA ARISTA (opcional - puede omitirse si falla)
-        logger.info("🔍 PASO 8: VERIFICANDO TABLA 'arista'...")
         try:
-            if 'arista' not in tablas_existentes:
-                logger.info("📦 Creando tabla 'arista'...")
-                cur.execute("""
-                    CREATE TABLE arista (
-                        id_grafo SERIAL PRIMARY KEY,
-                        id_ubi_us INT NOT NULL,
-                        id_ong INT NOT NULL,
-                        distancia NUMERIC(10, 2),
-                        fecha DATE NOT NULL,
-                        FOREIGN KEY (id_ubi_us) REFERENCES ubicacion_usuario(id_ubi_us),
-                        FOREIGN KEY (id_ong) REFERENCES ongs(id_ong)
-                    );
-                """)
-                logger.info("✅ Tabla 'arista' creada exitosamente")
-            else:
-                logger.info("✅ Tabla 'arista' ya existe")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS arista (
+                    id_grafo SERIAL PRIMARY KEY,
+                    id_ubi_us INT NOT NULL,
+                    id_ong INT NOT NULL,
+                    distancia NUMERIC(10, 2),
+                    fecha DATE NOT NULL,
+                    FOREIGN KEY (id_ubi_us) REFERENCES ubicacion_usuario(id_ubi_us),
+                    FOREIGN KEY (id_ong) REFERENCES ongs(id_ong)
+                );
+            """)
+            logger.info("✅ Tabla 'arista' verificada/creada")
         except Exception as e:
             logger.warning(f"⚠️ Error con tabla 'arista' (omitible): {e}")
-            # No hacemos rollback porque esta tabla es opcional
 
         conn.commit()
         cur.close()
         conn.close()
         
+        db_initialized = True
         logger.info("🎉 INICIALIZACIÓN DE BD COMPLETADA EXITOSAMENTE")
         return True
         
@@ -260,33 +225,32 @@ def init_database():
         logger.error(f"🔍 Stack trace completo: {traceback.format_exc()}")
         return False
 
-# INICIALIZACIÓN AL PRIMER REQUEST
-@app.before_request
-def initialize_on_first_request():
-    """Inicialización que se ejecuta una vez en el primer request"""
-    if not hasattr(g, 'db_initialized'):
-        logger.info("🚀 INICIANDO APLICACIÓN FLASK - PRIMER REQUEST")
+# Inicialización al inicio
+@app.before_first_request
+def initialize():
+    """Inicialización que se ejecuta una vez al inicio"""
+    global db_initialized
+    logger.info("🚀 INICIANDO APLICACIÓN FLASK - INICIALIZACIÓN")
+    if not db_initialized:
         init_database()
-        g.db_initialized = True
 
 @app.route("/")
 def home():
     """Endpoint raíz"""
     return jsonify({
         "status": "active", 
-        "message": "🚀 API Flask - ONGs México - ESQUEMA PDF IMPLEMENTADO",
-        "version": "4.0",
-        "database_status": "conectada",
+        "message": "🚀 API Flask - ONGs México - IMPLEMENTACIÓN CORREGIDA",
+        "version": "5.0",
+        "database_status": "conectada" if db_initialized else "inicializando",
         "timestamp": str(datetime.now())
     })
 
 @app.route("/api/health", methods=['GET'])
 def health_check():
-    """Health check optimizado para Railway"""
-    logger.info("❤️ SOLICITUD HEALTH CHECK - RAILWAY")
+    """Health check optimizado"""
+    logger.info("❤️ SOLICITUD HEALTH CHECK")
     
     try:
-        # Verificar conexión usando TU URL específica
         conn = get_db_connection()
         if not conn:
             return jsonify({
@@ -307,7 +271,6 @@ def health_check():
         """)
         tablas = [row[0] for row in cur.fetchall()]
         
-        # Verificar tablas esenciales según esquema PDF
         tablas_esenciales = ['usuario', 'ongs', 'municipio', 'ubicacion_usuario']
         tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in tablas]
         
@@ -323,22 +286,21 @@ def health_check():
         cur.close()
         conn.close()
         
-        # Determinar estado
         if not tablas_faltantes:
             estado = "healthy"
-            mensaje = "✅ SISTEMA OPERATIVO - ESQUEMA PDF"
+            mensaje = "✅ SISTEMA OPERATIVO"
         else:
             estado = "degraded"
-            mensaje = f"⚠️ SISTEMA DEGRADADO - Faltan: {tablas_faltantes}"
+            mensaje = f"⚠️ Faltan tablas: {tablas_faltantes}"
         
         return jsonify({
             "status": estado,
             "message": mensaje,
             "database_connection": True,
-            "connection_type": "DATABASE_URL (privada)",
             "tablas_esenciales": tablas_esenciales,
             "tablas_faltantes": tablas_faltantes,
             "estadisticas": stats,
+            "db_initialized": db_initialized,
             "timestamp": str(datetime.now())
         })
         
@@ -348,6 +310,7 @@ def health_check():
             "status": "error",
             "message": f"❌ ERROR: {str(e)}",
             "database_connection": False,
+            "db_initialized": db_initialized,
             "timestamp": str(datetime.now())
         }), 500
 
@@ -361,7 +324,8 @@ def verificar_conexion():
         "metodos_intentados": [],
         "conexion_exitosa": False,
         "url_utilizada": None,
-        "error": None
+        "error": None,
+        "db_initialized": db_initialized
     }
     
     # Método 1: DATABASE_URL
@@ -396,161 +360,33 @@ def verificar_conexion():
     
     return jsonify(resultado), 500
 
-@app.route("/api/debug-connection", methods=['GET'])
-def debug_connection():
-    """Debug específico para tu base de datos"""
-    try:
-        # Conexión directa con TU URL
-        conn = psycopg2.connect(
-            "postgresql://postgres:KAGJhRklTcsevGqKEgCNPfmdDiGzsLyQ@switchyard.proxy.rlwy.net:13155/railway"
-        )
-        
-        cur = conn.cursor()
-        cur.execute("SELECT version(), current_database(), current_user")
-        db_info = cur.fetchone()
-        
-        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
-        tables = [row[0] for row in cur.fetchall()]
-        
-        cur.close()
-        conn.close()
-        
+@app.route("/api/initdb", methods=['GET', 'POST'])
+def init_db():
+    """Forzar inicialización de BD"""
+    global db_initialized
+    logger.info("🔄 SOLICITUD DE INICIALIZACIÓN DE BD")
+    
+    success = init_database()
+    
+    if success:
         return jsonify({
-            "status": "success",
-            "database_version": db_info[0],
-            "database_name": db_info[1],
-            "current_user": db_info[2],
-            "tables": tables,
-            "message": "✅ CONEXIÓN EXITOSA A TU BD"
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"❌ Error de conexión: {str(e)}",
+            "success": True,
+            "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE",
+            "db_initialized": db_initialized,
             "timestamp": str(datetime.now())
-        }), 500
-
-@app.route("/api/info-variables", methods=['GET'])
-def info_variables():
-    """Mostrar información sobre las variables de entorno (sin exponer contraseñas)"""
-    database_url = os.environ.get('DATABASE_URL')
-    
-    info = {
-        "timestamp": str(datetime.now()),
-        "variables": {
-            "DATABASE_URL_existe": bool(database_url),
-            "DATABASE_URL_host": None,
-        },
-        "recomendacion": "Usar DATABASE_URL para evitar cargos por egreso"
-    }
-    
-    if database_url:
-        # Extraer host de forma segura
-        if "@" in database_url and ":" in database_url:
-            host_part = database_url.split("@")[1].split(":")[0]
-            info["variables"]["DATABASE_URL_host"] = host_part
-    
-    return jsonify(info)
-
-@app.route("/api/diagnostico-bd", methods=['GET'])
-def diagnostico_bd():
-    """Diagnóstico completo de la base de datos"""
-    logger.info("🔍 INICIANDO DIAGNÓSTICO COMPLETO DE BD")
-    
-    diagnostico = {
-        "timestamp": str(datetime.now()),
-        "conexion": None,
-        "tablas_existentes": [],
-        "estructura_tablas": {},
-        "errores": [],
-        "recomendaciones": []
-    }
-    
-    try:
-        # 1. Verificar conexión
-        conn = get_db_connection()
-        if not conn:
-            diagnostico["conexion"] = "❌ FALLIDA"
-            diagnostico["errores"].append("No se pudo conectar a la base de datos")
-            return jsonify(diagnostico)
-        
-        diagnostico["conexion"] = "✅ EXITOSA"
-        cur = conn.cursor()
-        
-        # 2. Verificar tablas existentes
-        try:
-            cur.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public'
-                ORDER BY table_name
-            """)
-            tablas = [row[0] for row in cur.fetchall()]
-            diagnostico["tablas_existentes"] = tablas
-        except Exception as e:
-            diagnostico["errores"].append(f"Error al listar tablas: {str(e)}")
-        
-        # 3. Verificar estructura de tablas esenciales
-        tablas_esenciales = ['usuario', 'municipio', 'ongs', 'ubicacion_usuario']
-        for tabla in tablas_esenciales:
-            try:
-                cur.execute("""
-                    SELECT column_name, data_type, is_nullable 
-                    FROM information_schema.columns 
-                    WHERE table_name = %s 
-                    ORDER BY ordinal_position
-                """, (tabla,))
-                columnas = cur.fetchall()
-                diagnostico["estructura_tablas"][tabla] = [
-                    {"nombre": col[0], "tipo": col[1], "nulable": col[2]} 
-                    for col in columnas
-                ]
-            except Exception as e:
-                diagnostico["estructura_tablas"][tabla] = f"Error: {str(e)}"
-        
-        # 4. Verificar datos de ejemplo
-        try:
-            cur.execute("SELECT COUNT(*) FROM municipio")
-            count_municipios = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM ongs")
-            count_ongs = cur.fetchone()[0]
-            
-            diagnostico["datos_ejemplo"] = {
-                "municipios": count_municipios,
-                "ongs": count_ongs
-            }
-        except Exception as e:
-            diagnostico["errores"].append(f"Error contando datos: {str(e)}")
-        
-        cur.close()
-        conn.close()
-        
-        # 5. Generar recomendaciones
-        tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in diagnostico["tablas_existentes"]]
-        
-        if tablas_faltantes:
-            diagnostico["recomendaciones"].append(f"Faltan tablas: {tablas_faltantes}. Ejecuta /api/initdb")
-        else:
-            diagnostico["recomendaciones"].append("✅ Todas las tablas esenciales existen")
-        
-        if diagnostico["conexion"] == "✅ EXITOSA" and not tablas_faltantes:
-            diagnostico["estado"] = "✅ SALUDABLE"
-        else:
-            diagnostico["estado"] = "❌ CON PROBLEMAS"
-        
-        return jsonify(diagnostico)
-        
-    except Exception as e:
-        logger.error(f"💥 Error en diagnóstico BD: {e}")
+        })
+    else:
         return jsonify({
-            "error": f"Error en diagnóstico: {str(e)}",
+            "success": False,
+            "message": "❌ ERROR INICIALIZANDO BASE DE DATOS",
+            "db_initialized": db_initialized,
             "timestamp": str(datetime.now())
         }), 500
 
 @app.route("/api/reset-bd", methods=['POST'])
 def reset_bd():
     """Eliminar y recrear todas las tablas (SOLO PARA DESARROLLO)"""
+    global db_initialized
     logger.info("🔄 SOLICITUD DE RESET COMPLETO DE BD")
     
     try:
@@ -577,46 +413,27 @@ def reset_bd():
         cur.close()
         conn.close()
         
+        db_initialized = False
         logger.info("✅ Reset de BD completado, ahora ejecuta /api/initdb")
         
         return jsonify({
             "success": True,
-            "message": "✅ Base de datos reseteada. Ahora ejecuta /api/initdb para recrear las tablas."
+            "message": "✅ Base de datos reseteada. Ahora ejecuta /api/initdb para recrear las tablas.",
+            "db_initialized": db_initialized
         })
         
     except Exception as e:
         logger.error(f"💥 Error en reset BD: {e}")
         return jsonify({
             "success": False,
-            "message": f"❌ Error reseteando BD: {str(e)}"
-        }), 500
-
-@app.route("/api/initdb", methods=['GET', 'POST'])
-def init_db():
-    """Forzar inicialización de BD con respuesta detallada"""
-    logger.info("🔄 SOLICITUD DE INICIALIZACIÓN DE BD")
-    
-    success = init_database()
-    
-    if success:
-        return jsonify({
-            "success": True,
-            "message": "✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE SEGÚN ESQUEMA PDF",
-            "details": "Todas las tablas del PDF verificadas/creadas",
-            "timestamp": str(datetime.now())
-        })
-    else:
-        return jsonify({
-            "success": False,
-            "message": "❌ ERROR INICIALIZANDO BASE DE DATOS",
-            "details": "Revisar logs para más información",
-            "timestamp": str(datetime.now())
+            "message": f"❌ Error reseteando BD: {str(e)}",
+            "db_initialized": db_initialized
         }), 500
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     """REGISTRO DE USUARIO - CORREGIDO SEGÚN ESQUEMA PDF"""
-    logger.info("🎯 INICIANDO PROCESO DE REGISTRO - ESQUEMA PDF")
+    logger.info("🎯 INICIANDO PROCESO DE REGISTRO")
     
     try:
         # 1. OBTENER Y VALIDAR DATOS DE ENTRADA
@@ -1030,11 +847,12 @@ def get_ongs():
         try:
             # ✅ CORREGIDO: JOIN con municipio según esquema PDF
             cur.execute("""
-                SELECT o.nom_ong, o.tipo, o.latitud, o.longitud, 
+                SELECT o.id_ong, o.nom_ong, o.tipo, o.latitud, o.longitud, 
                        m.nom_municipio, m.nom_estado
                 FROM ongs o
                 LEFT JOIN municipio m ON o.id_municipio = m.id_municipio
                 WHERE o.latitud IS NOT NULL AND o.longitud IS NOT NULL
+                ORDER BY o.nom_ong
                 LIMIT 50
             """)
             ongs_data = cur.fetchall()
@@ -1042,12 +860,13 @@ def get_ongs():
             ongs_list = []
             for ong in ongs_data:
                 ongs_list.append({
-                    'nom_ong': ong[0] or 'Sin nombre',
-                    'tipo': ong[1] or 'Sin descripción',
-                    'latitud': float(ong[2]) if ong[2] else 0.0,
-                    'longitud': float(ong[3]) if ong[3] else 0.0,
-                    'municipio': ong[4] or 'Sin municipio',
-                    'estado': ong[5] or 'Sin estado'
+                    'id_ong': ong[0],
+                    'nom_ong': ong[1] or 'Sin nombre',
+                    'tipo': ong[2] or 'Sin descripción',
+                    'latitud': float(ong[3]) if ong[3] else 0.0,
+                    'longitud': float(ong[4]) if ong[4] else 0.0,
+                    'municipio': ong[5] or 'Sin municipio',
+                    'estado': ong[6] or 'Sin estado'
                 })
 
             cur.close()
@@ -1082,12 +901,22 @@ def obtener_ongs_ejemplo():
     """ONGs de ejemplo cuando falla la BD"""
     return [
         {
+            'id_ong': 1,
             'nom_ong': 'Fundación Infantil Mexicana',
             'tipo': 'Ayuda a niños en situación vulnerable',
             'latitud': 19.4326,
             'longitud': -99.1332,
             'municipio': 'Ciudad de México',
             'estado': 'CDMX'
+        },
+        {
+            'id_ong': 2,
+            'nom_ong': 'Ecología y Desarrollo',
+            'tipo': 'Protección ambiental',
+            'latitud': 20.6668,
+            'longitud': -103.3918,
+            'municipio': 'Guadalajara',
+            'estado': 'Jalisco'
         }
     ]
 
@@ -1143,6 +972,105 @@ def get_municipios():
             'success': False,
             'message': 'Error del servidor',
             'municipios': []
+        }), 500
+
+@app.route("/api/diagnostico-bd", methods=['GET'])
+def diagnostico_bd():
+    """Diagnóstico completo de la base de datos"""
+    logger.info("🔍 INICIANDO DIAGNÓSTICO COMPLETO DE BD")
+    
+    diagnostico = {
+        "timestamp": str(datetime.now()),
+        "conexion": None,
+        "tablas_existentes": [],
+        "estructura_tablas": {},
+        "errores": [],
+        "recomendaciones": [],
+        "db_initialized": db_initialized
+    }
+    
+    try:
+        # 1. Verificar conexión
+        conn = get_db_connection()
+        if not conn:
+            diagnostico["conexion"] = "❌ FALLIDA"
+            diagnostico["errores"].append("No se pudo conectar a la base de datos")
+            return jsonify(diagnostico)
+        
+        diagnostico["conexion"] = "✅ EXITOSA"
+        cur = conn.cursor()
+        
+        # 2. Verificar tablas existentes
+        try:
+            cur.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            tablas = [row[0] for row in cur.fetchall()]
+            diagnostico["tablas_existentes"] = tablas
+        except Exception as e:
+            diagnostico["errores"].append(f"Error al listar tablas: {str(e)}")
+        
+        # 3. Verificar estructura de tablas esenciales
+        tablas_esenciales = ['usuario', 'municipio', 'ongs', 'ubicacion_usuario']
+        for tabla in tablas_esenciales:
+            try:
+                cur.execute("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s 
+                    ORDER BY ordinal_position
+                """, (tabla,))
+                columnas = cur.fetchall()
+                diagnostico["estructura_tablas"][tabla] = [
+                    {"nombre": col[0], "tipo": col[1], "nulable": col[2]} 
+                    for col in columnas
+                ]
+            except Exception as e:
+                diagnostico["estructura_tablas"][tabla] = f"Error: {str(e)}"
+        
+        # 4. Verificar datos de ejemplo
+        try:
+            cur.execute("SELECT COUNT(*) FROM municipio")
+            count_municipios = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM ongs")
+            count_ongs = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM usuario")
+            count_usuarios = cur.fetchone()[0]
+            
+            diagnostico["datos_ejemplo"] = {
+                "municipios": count_municipios,
+                "ongs": count_ongs,
+                "usuarios": count_usuarios
+            }
+        except Exception as e:
+            diagnostico["errores"].append(f"Error contando datos: {str(e)}")
+        
+        cur.close()
+        conn.close()
+        
+        # 5. Generar recomendaciones
+        tablas_faltantes = [tabla for tabla in tablas_esenciales if tabla not in diagnostico["tablas_existentes"]]
+        
+        if tablas_faltantes:
+            diagnostico["recomendaciones"].append(f"Faltan tablas: {tablas_faltantes}. Ejecuta /api/initdb")
+        else:
+            diagnostico["recomendaciones"].append("✅ Todas las tablas esenciales existen")
+        
+        if diagnostico["conexion"] == "✅ EXITOSA" and not tablas_faltantes:
+            diagnostico["estado"] = "✅ SALUDABLE"
+        else:
+            diagnostico["estado"] = "❌ CON PROBLEMAS"
+        
+        return jsonify(diagnostico)
+        
+    except Exception as e:
+        logger.error(f"💥 Error en diagnóstico BD: {e}")
+        return jsonify({
+            "error": f"Error en diagnóstico: {str(e)}",
+            "timestamp": str(datetime.now())
         }), 500
 
 @app.route("/mapa")
